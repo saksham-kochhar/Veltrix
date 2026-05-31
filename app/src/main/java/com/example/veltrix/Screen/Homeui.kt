@@ -367,7 +367,8 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
                     viewmodel.sendmessage(question)
                     question = ""}
                     else {
-
+                        viewmodel.sendMessageOffline(question)
+                        question = ""
                     }
                 }) {
                             Icon(imageVector = Icons.AutoMirrored.Outlined.Send ,
