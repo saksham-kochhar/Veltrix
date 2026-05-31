@@ -40,13 +40,16 @@ import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.School
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,20 +60,22 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.veltrix.Instruction
 import com.example.veltrix.Response
 import com.example.veltrix.veltrixviewmodel
+import com.google.api.Context
 
 @Composable
 fun ChatbotScreen(viewmodel : veltrixviewmodel) {
-    var onlineMode by remember { mutableStateOf(true) }
 
     val activeColor by animateColorAsState(
-        if (onlineMode) Color(0xFF5B4DFF)
+        if (viewmodel.OnlineMode) Color(0xFF5B4DFF)
         else Color(0xFF00C853),
         label = ""
     )
@@ -82,6 +87,7 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
         "Code" -> Color(0xFF009688)
         else -> Color(0xFFF5F5FA)
     }
+    val context = LocalContext.current
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -175,20 +181,20 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
 
                 ModeButton(
                     title = "Online",
-                    selected = onlineMode,
+                    selected = viewmodel.OnlineMode,
                     icon = Icons.Outlined.Language,
                     activeColor = Color(0xFF5B4DFF)
                 ) {
-                    onlineMode = true
+                    viewmodel.OnlineMode = true
                 }
 
                 ModeButton(
                     title = "Offline",
-                    selected = !onlineMode,
+                    selected = !viewmodel.OnlineMode,
                     icon = Icons.Outlined.CloudOff,
                     activeColor = Color(0xFF00C853)
                 ) {
-                    onlineMode = false
+                    viewmodel.OnlineMode = false
                 }
             }
 
@@ -201,7 +207,7 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
                         .size(10.dp)
                         .clip(CircleShape)
                         .background(
-                            if (onlineMode) Color(0xFF5B4DFF)
+                            if (viewmodel.OnlineMode) Color(0xFF5B4DFF)
                             else Color(0xFF00C853)
                         )
                 )
@@ -209,7 +215,7 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
                 Spacer(modifier = Modifier.width(10.dp))
 
                 Text(
-                    text = if (onlineMode)
+                    text = if (viewmodel.OnlineMode)
                         "Connected • Responses may use internet"
                     else
                         "Offline mode enabled • Responses may take some time",
@@ -230,7 +236,21 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
 
 
 
-            if (question == "" && viewmodel.messagelist.isEmpty() )
+            if (viewmodel.OnlineMode == false) {
+                if (!viewmodel.isModelDownloaded) {
+                    Button(onClick = { viewmodel.downloadModel(context) }) {
+                        Text("Download Offline Model (380MB)")
+                    }
+                    if (viewmodel.isDownloading) {
+                        LinearProgressIndicator(progress = viewmodel.downloadProgress)
+                        Text("${(viewmodel.downloadProgress * 100).toInt()}%")
+                    }
+                }
+            }
+
+
+
+            if (question == "" && viewmodel.messagelist.isEmpty() && viewmodel.OnlineMode)
             {
                 Text(
                     text = "Suggestions",
@@ -343,7 +363,7 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
                         .background(activeColor),
                     contentAlignment = Alignment.Center
                 ) { IconButton(onClick = {
-                    if(onlineMode){
+                    if(viewmodel.OnlineMode){
                     viewmodel.sendmessage(question)
                     question = ""}
                     else {
