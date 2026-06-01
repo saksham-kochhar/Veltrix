@@ -31,6 +31,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Code
@@ -41,14 +43,19 @@ import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Divider
+import androidx.compose.material3.DividerDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +73,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.exoplayer.offline.Download
 import com.example.veltrix.Instruction
 import com.example.veltrix.Response
 import com.example.veltrix.veltrixviewmodel
@@ -93,12 +101,22 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
         modifier = Modifier.fillMaxSize(),
         color = modeColor.copy(alpha = 0.06f)
     ) {
+        LaunchedEffect(Unit) {
+            viewmodel.refreshModelStatus(context)
+        }
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 20.dp)
         ) {
+            LaunchedEffect(Unit) {
+                viewmodel.refreshModelStatus(context)
+
+                if (viewmodel.isModelDownloaded) {
+                    viewmodel.loadLocalModel(context)
+                }
+            }
 
             Spacer(modifier = Modifier.height(40.dp))
 
@@ -199,7 +217,8 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
             }
 
             Spacer(modifier = Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically , modifier = Modifier.fillMaxWidth(),
+            Row(verticalAlignment = Alignment.CenterVertically ,
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center) {
 
                 Box(
@@ -237,13 +256,136 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
 
 
             if (viewmodel.OnlineMode == false) {
-                if (!viewmodel.isModelDownloaded) {
-                    Button(onClick = { viewmodel.downloadModel(context) }) {
-                        Text("Download Offline Model (380MB)")
-                    }
-                    if (viewmodel.isDownloading) {
-                        LinearProgressIndicator(progress = viewmodel.downloadProgress)
-                        Text("${(viewmodel.downloadProgress * 100).toInt()}%")
+                if (viewmodel.isModelDownloaded == false) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color.White
+                        )
+                    ) {
+
+                        Column(
+                            modifier = Modifier.padding(20.dp)
+                        ) {
+
+                            Row {
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(90.dp)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(Color(0xFFE9FFF0)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+
+                                    Icon(
+                                        Icons.Default.Download,
+                                        contentDescription = null,
+                                        tint = Color(0xFF00C853),
+                                        modifier = Modifier.size(42.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(18.dp))
+
+                                Column {
+
+                                    Text(
+                                        "Download Offline Model",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 24.sp
+                                    )
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    Surface(
+                                        color = Color(0xFFE8FFF1),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text(
+                                            "Recommended",
+                                            modifier = Modifier.padding(
+                                                horizontal = 10.dp,
+                                                vertical = 4.dp
+                                            ),
+                                            color = Color(0xFF00A651)
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    Text(
+                                        "Get the model to use Veltrix offline.\nThis model only needs to be downloaded once.",
+                                        color = Color.Gray
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            HorizontalDivider(
+                                Modifier,
+                                DividerDefaults.Thickness,
+                                DividerDefaults.color
+                            )
+
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+
+                                Column(
+                                    modifier = Modifier.weight(1f)
+                                ) {
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+
+                                        Icon(
+                                            Icons.Default.Storage,
+                                            contentDescription = null,
+                                            tint = Color.Gray
+                                        )
+
+                                        Spacer(modifier = Modifier.width(8.dp))
+
+                                        Text(
+                                            "380MB",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 22.sp
+                                        )
+                                    }
+
+                                    Text(
+                                        "Estimated size",
+                                        color = Color.Gray
+                                    )
+                                }
+
+                                Button(
+                                    onClick = {
+                                        viewmodel.downloadModel(context)
+                                    },
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF00C853)
+                                    )
+                                ) {
+
+                                    Icon(
+                                        Icons.Default.Download,
+                                        contentDescription = null
+                                    )
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                    Text("Download (380MB)")
+                                }
+                            }
+                        }
                     }
                 }
             }

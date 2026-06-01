@@ -170,7 +170,6 @@ fun AuthScreen(
                 value = viewModel.email,
                 onValueChange = {
                     viewModel.email = it
-                    errorMessage = ""
                     viewModel.resetState()
                 },
                 leadingIcon = { Icon(Icons.Outlined.Email, null) },
@@ -196,7 +195,6 @@ fun AuthScreen(
                 value = password,
                 onValueChange = {
                     password = it
-                    errorMessage = ""
                     viewModel.resetState()
                 },
                 leadingIcon = { Icon(Icons.Outlined.Lock, null) },
@@ -221,14 +219,14 @@ fun AuthScreen(
                     value = confirmPassword,
                     onValueChange = {
                         confirmPassword = it
-                        errorMessage = ""
                         viewModel.resetState()
                     },
                     leadingIcon = { Icon(Icons.Outlined.Lock, null) },
                     trailingIcon = {
                         IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) {
                             Icon(
-                                if (confirmPasswordVisible) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
+                                if (confirmPasswordVisible) Icons.Outlined.Visibility
+                                else Icons.Outlined.VisibilityOff,
                                 null
                             )
                         }

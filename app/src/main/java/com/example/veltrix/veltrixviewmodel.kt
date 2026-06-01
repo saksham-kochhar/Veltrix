@@ -3,6 +3,7 @@ package com.example.veltrix
 
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -35,18 +36,12 @@ class veltrixviewmodel : ViewModel(){
     var isDownloading by mutableStateOf(false)
     var downloadProgress by mutableStateOf(0f)
     var isModelDownloaded by mutableStateOf(false)
+        private set
 
     var OnlineMode by mutableStateOf(true)
 
 
 
-    fun sendmessageboth(question: String) {
-        if (OnlineMode == false ) {
-            sendMessageOffline(question)
-        } else {
-            sendmessage(question)
-        }
-    }
     fun sendmessage(question: String) {
         viewModelScope.launch {
             loading = true
@@ -228,9 +223,17 @@ class veltrixviewmodel : ViewModel(){
 
     //Offline Model
 
-    fun checkModelDownloaded(context: Context) {
-        val file = File(context.filesDir, "qwen2.5-0.5b-q4.gguf")
-        isModelDownloaded = file.exists()
+    fun refreshModelStatus(context: Context) {
+        val exists = File(
+            context.filesDir,
+            "Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task"
+        ).exists()
+
+        isModelDownloaded = exists
+
+        if (exists && llmInference == null) {
+            loadLocalModel(context)
+        }
     }
 
     fun downloadModel(context: Context) {
@@ -238,11 +241,11 @@ class veltrixviewmodel : ViewModel(){
             isDownloading = true
             withContext(Dispatchers.IO) {
                 try {
-                    val url = java.net.URL("https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf")
+                    val url = java.net.URL("https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task")
                     val connection = url.openConnection() as java.net.HttpURLConnection
                     val totalSize = connection.contentLength
                     val input = connection.inputStream
-                    val file = File(context.filesDir, "qwen2.5-0.5b-q4.gguf")
+                    val file = File(context.filesDir, "Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task")
                     var downloaded = 0L
                     val buffer = ByteArray(8192)
                     file.outputStream().use { output ->
@@ -257,12 +260,13 @@ class veltrixviewmodel : ViewModel(){
                     withContext(Dispatchers.Main) {
                         isDownloading = false
                         downloadProgress = 0f
-                        File(context.filesDir, "qwen2.5-0.5b-q4.gguf").delete()
+                        File(context.filesDir, "Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task").delete()
                         messagelist.add(Response("Download failed: ${e.message}", "Model"))
                 }
             }
             isDownloading = false
             isModelDownloaded = true
+                loadLocalModel(context)
         }
     }
 
@@ -272,29 +276,61 @@ class veltrixviewmodel : ViewModel(){
 
     fun loadLocalModel(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
-            val modelPath = File(context.filesDir, "qwen2.5-0.5b-q4.gguf").absolutePath
-            val options = LlmInference.LlmInferenceOptions.builder()
-                .setModelPath(modelPath)
-                .setMaxTokens(1024)
-                .setTopK(40)
-                .setTemperature(0.7f)
-                .setRandomSeed(42)
-                .build()
-            llmInference = LlmInference.createFromOptions(context, options)
+
+            try {
+                val modelPath =
+                    File(context.filesDir, "Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task").absolutePath
+
+                val options = LlmInference.LlmInferenceOptions.builder()
+                    .setModelPath(modelPath)
+                    .setMaxTokens(1024)
+                    .build()
+
+                llmInference = LlmInference.createFromOptions(context, options)
+
+            } catch (t: Throwable) {
+
+                Log.e("VELTRIX", "MODEL LOAD FAILED", t)
+
+                withContext(Dispatchers.Main) {
+                    messagelist.add(
+                        Response(
+                            "Offline model is not compatible with MediaPipe.",
+                            "Model"
+                        )
+                    )
+                }
+
+                return@launch
+            }
         }
     }
 
     fun sendMessageOffline(question: String) {
+        if (question.isBlank() || loading) return
+
         viewModelScope.launch {
             loading = true
+
             try {
                 messagelist.add(Response(question, "User"))
-                val reply = withContext(Dispatchers.IO) {
-                    llmInference?.generateResponse(question) ?: "Model not loaded"
+
+                val model = llmInference
+                if (model == null) {
+                    messagelist.add(Response("Model not loaded", "Model"))
+                    return@launch
                 }
+
+                val reply = withContext(Dispatchers.IO) {
+                    model.generateResponse(question)
+                }
+
                 messagelist.add(Response(reply, "Model"))
+
             } catch (e: Exception) {
-                messagelist.add(Response("Error: ${e.message}", "Model"))
+                messagelist.add(
+                    Response("Error: ${e.localizedMessage}", "Model")
+                )
             } finally {
                 loading = false
             }

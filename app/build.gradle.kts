@@ -63,7 +63,7 @@ dependencies {
     implementation("androidx.compose.runtime:runtime-livedata")
 
     //offline dependency
-    implementation("com.google.mediapipe:tasks-genai:0.10.14")
+    implementation("com.google.mediapipe:tasks-genai:0.10.35")
 
     //Navigation
     implementation("androidx.navigation:navigation-compose:2.9.8")
@@ -83,6 +83,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.media3.exoplayer)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
