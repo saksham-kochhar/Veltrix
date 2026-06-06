@@ -255,22 +255,16 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
 
 
 
-            if (viewmodel.OnlineMode == false) {
-                if (viewmodel.isModelDownloaded == false) {
+            if (!viewmodel.OnlineMode) {
+                if (!viewmodel.isModelDownloaded) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = Color.White
-                        )
+                        colors = CardDefaults.cardColors(containerColor = Color.White)
                     ) {
-
-                        Column(
-                            modifier = Modifier.padding(20.dp)
-                        ) {
+                        Column(modifier = Modifier.padding(20.dp)) {
 
                             Row {
-
                                 Box(
                                     modifier = Modifier
                                         .size(90.dp)
@@ -278,7 +272,6 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
                                         .background(Color(0xFFE9FFF0)),
                                     contentAlignment = Alignment.Center
                                 ) {
-
                                     Icon(
                                         Icons.Default.Download,
                                         contentDescription = null,
@@ -290,7 +283,6 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
                                 Spacer(modifier = Modifier.width(18.dp))
 
                                 Column {
-
                                     Text(
                                         "Download Offline Model",
                                         fontWeight = FontWeight.Bold,
@@ -305,10 +297,7 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
                                     ) {
                                         Text(
                                             "Recommended",
-                                            modifier = Modifier.padding(
-                                                horizontal = 10.dp,
-                                                vertical = 4.dp
-                                            ),
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                                             color = Color(0xFF00A651)
                                         )
                                     }
@@ -323,66 +312,79 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
                             }
 
                             Spacer(modifier = Modifier.height(20.dp))
-
-                            HorizontalDivider(
-                                Modifier,
-                                DividerDefaults.Thickness,
-                                DividerDefaults.color
-                            )
-
+                            HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
                             Spacer(modifier = Modifier.height(20.dp))
 
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-
-                                Column(
-                                    modifier = Modifier.weight(1f)
+                            if (viewmodel.isDownloading) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-
-                                        Icon(
-                                            Icons.Default.Storage,
-                                            contentDescription = null,
-                                            tint = Color.Gray
-                                        )
-
-                                        Spacer(modifier = Modifier.width(8.dp))
-
-                                        Text(
-                                            "380MB",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 22.sp
-                                        )
-                                    }
-
                                     Text(
-                                        "Estimated size",
-                                        color = Color.Gray
+                                        "Downloading model...",
+                                        color = Color.Gray,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        "${(viewmodel.downloadProgress * 100).toInt()}%",
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF00C853),
+                                        fontSize = 14.sp
                                     )
                                 }
 
-                                Button(
-                                    onClick = {
-                                        viewmodel.downloadModel(context)
-                                    },
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF00C853)
-                                    )
-                                ) {
+                                Spacer(modifier = Modifier.height(10.dp))
 
-                                    Icon(
-                                        Icons.Default.Download,
-                                        contentDescription = null
-                                    )
+                                LinearProgressIndicator(
+                                    progress = { viewmodel.downloadProgress },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp)
+                                        .clip(RoundedCornerShape(4.dp)),
+                                    color = Color(0xFF00C853),
+                                    trackColor = Color(0xFFE0E0E0)
+                                )
 
-                                    Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
 
-                                    Text("Download (380MB)")
+                                Text(
+                                    "${(viewmodel.downloadProgress * 1500).toInt()} MB / 1500 MB",
+                                    color = Color.Gray,
+                                    fontSize = 12.sp
+                                )
+
+                            } else {
+                                // Download button UI
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                Icons.Default.Storage,
+                                                contentDescription = null,
+                                                tint = Color.Gray
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                "1.5 GB",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 22.sp
+                                            )
+                                        }
+                                        Text("Estimated size", color = Color.Gray)
+                                    }
+
+                                    Button(
+                                        onClick = { viewmodel.downloadModel(context) },
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFF00C853)
+                                        )
+                                    ) {
+                                        Icon(Icons.Default.Download, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Download (1.5GB)")
+                                    }
                                 }
                             }
                         }
@@ -480,7 +482,7 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
                 BasicTextField(
                     value = question,
                     onValueChange = { question = it },
-                    modifier = Modifier.weight(1f).padding(vertical = 8.dp),
+                    modifier = Modifier.weight(1f).padding(vertical = 4.dp),
                     textStyle = TextStyle(fontSize = 16.sp, color = Color(0xFF111133)),
                     decorationBox = { inner ->
                         if (question.isEmpty()) Text("Ask anything…", color = Color(0xFFBBBBCC), fontSize = 16.sp)
@@ -512,7 +514,7 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
                         viewmodel.sendMessageOffline(question)
                         question = ""
                     }
-                }) {
+                }, enabled = question != "" ) {
                             Icon(imageVector = Icons.AutoMirrored.Outlined.Send ,
                                 contentDescription = null ,
                                 tint = Color.White)

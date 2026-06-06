@@ -42,6 +42,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -172,6 +173,16 @@ fun AuthScreen(
                     viewModel.email = it
                     viewModel.resetState()
                 },
+                colors = TextFieldDefaults.colors(
+                    focusedTextColor = Color(0xFF1A1A2E),
+                    unfocusedTextColor = Color(0xFF1A1A2E),
+                    focusedPlaceholderColor = Color(0xFF9E9E9E),
+                    unfocusedPlaceholderColor = Color(0xFF9E9E9E),
+                    focusedIndicatorColor = Color(0xFF5C6BC0),
+                    unfocusedIndicatorColor = Color(0xFFBDBDBD),
+                    focusedContainerColor = Color.White,
+                    unfocusedContainerColor = Color.White,
+                ),
                 leadingIcon = { Icon(Icons.Outlined.Email, null) },
                 trailingIcon = {
                     if (viewModel.email.isNotEmpty()) {
@@ -198,6 +209,16 @@ fun AuthScreen(
                     viewModel.resetState()
                 },
                 leadingIcon = { Icon(Icons.Outlined.Lock, null) },
+                colors = TextFieldDefaults.colors(
+                    focusedTextColor = Color(0xFF1A1A2E),
+                    unfocusedTextColor = Color(0xFF1A1A2E),
+                    focusedPlaceholderColor = Color(0xFF9E9E9E),
+                    unfocusedPlaceholderColor = Color(0xFF9E9E9E),
+                    focusedIndicatorColor = Color(0xFF5C6BC0),
+                    unfocusedIndicatorColor = Color(0xFFBDBDBD),
+                    focusedContainerColor = Color.White,
+                    unfocusedContainerColor = Color.White,
+                ),
                 trailingIcon = {
                     IconButton(onClick = { passwordVisible = !passwordVisible }) {
                         Icon(

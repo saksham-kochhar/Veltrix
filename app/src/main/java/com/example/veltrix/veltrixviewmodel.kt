@@ -3,12 +3,10 @@ package com.example.veltrix
 
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
@@ -40,6 +38,13 @@ class veltrixviewmodel : ViewModel(){
 
     var OnlineMode by mutableStateOf(true)
 
+    fun String.escapeJson(): String = this
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+
 
 
     fun sendmessage(question: String) {
@@ -52,26 +57,40 @@ class veltrixviewmodel : ViewModel(){
                     ?: throw Exception("Not logged in")
 
                 val reply = withContext(Dispatchers.IO) {
+
+                    val history = messagelist
+                        .dropLast(1)
+                        .takeLast(10)
+                        .map {
+                            val role = if (it.Role == "User") "user" else "model"
+                            """{"role":"$role","content":"${it.message.escapeJson()}"}"""
+                        }
+                        .joinToString(",")
+
+                    val requestBody = """
+                        {
+                        "message": "${question.escapeJson()}",
+                        "history": [$history]
+                        }
+                        """.trimIndent()
+
                     val url = java.net.URL("https://veltrix-backend-production.up.railway.app/chat")
                     val connection = url.openConnection() as java.net.HttpURLConnection
                     connection.requestMethod = "POST"
                     connection.setRequestProperty("Content-Type", "application/json")
                     connection.setRequestProperty("Authorization", "Bearer $idToken")
                     connection.doOutput = true
-
-                    val requestBody = """{"message": "${question.replace("\"", "\\\"")}"}"""
                     connection.outputStream.write(requestBody.toByteArray())
 
-                    val responseCode = connection.responseCode
-                    when (responseCode) {
+                    when (connection.responseCode) {
                         200 -> {
                             val response = connection.inputStream.bufferedReader().readText()
                             org.json.JSONObject(response).getString("reply")
                         }
-                        429 -> "You have reached your free limit. You can still Use offline Model"
+                        429 -> "You have reached your free limit. You can still use offline model"
                         else -> {
                             val error = connection.errorStream?.bufferedReader()?.readText()
-                            "Error $responseCode: $error"
+                            "Error ${connection.responseCode}: $error"
                         }
                     }
                 }
@@ -224,14 +243,17 @@ class veltrixviewmodel : ViewModel(){
     //Offline Model
 
     fun refreshModelStatus(context: Context) {
-        val exists = File(
-            context.filesDir,
-            "Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task"
-        ).exists()
+        val file = File(context.filesDir, "Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task")
 
-        isModelDownloaded = exists
+        val isValid = file.exists() && file.length() > 1_400_000_000L
 
-        if (exists && llmInference == null) {
+        if (file.exists() && !isValid) {
+            file.delete()
+        }
+
+        isModelDownloaded = isValid
+
+        if (isValid && llmInference == null) {
             loadLocalModel(context)
         }
     }
@@ -240,12 +262,12 @@ class veltrixviewmodel : ViewModel(){
         viewModelScope.launch {
             isDownloading = true
             withContext(Dispatchers.IO) {
+                val file = File(context.filesDir, "Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task")
                 try {
                     val url = java.net.URL("https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task")
                     val connection = url.openConnection() as java.net.HttpURLConnection
                     val totalSize = connection.contentLength
                     val input = connection.inputStream
-                    val file = File(context.filesDir, "Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task")
                     var downloaded = 0L
                     val buffer = ByteArray(8192)
                     file.outputStream().use { output ->
@@ -256,21 +278,24 @@ class veltrixviewmodel : ViewModel(){
                             downloadProgress = downloaded.toFloat() / totalSize
                         }
                     }
+                    withContext(Dispatchers.Main) {
+                        isDownloading = false
+                        isModelDownloaded = true
+                    }
+                    loadLocalModel(context)
+
                 } catch (e: Exception) {
+                    if (file.exists()) file.delete()
                     withContext(Dispatchers.Main) {
                         isDownloading = false
                         downloadProgress = 0f
-                        File(context.filesDir, "Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task").delete()
+                        isModelDownloaded = false
                         messagelist.add(Response("Download failed: ${e.message}", "Model"))
+                    }
                 }
             }
-            isDownloading = false
-            isModelDownloaded = true
-                loadLocalModel(context)
         }
     }
-
-}
 
     private var llmInference: LlmInference? = null
 
@@ -283,15 +308,11 @@ class veltrixviewmodel : ViewModel(){
 
                 val options = LlmInference.LlmInferenceOptions.builder()
                     .setModelPath(modelPath)
-                    .setMaxTokens(1024)
                     .build()
 
                 llmInference = LlmInference.createFromOptions(context, options)
 
             } catch (t: Throwable) {
-
-                Log.e("VELTRIX", "MODEL LOAD FAILED", t)
-
                 withContext(Dispatchers.Main) {
                     messagelist.add(
                         Response(
@@ -311,7 +332,6 @@ class veltrixviewmodel : ViewModel(){
 
         viewModelScope.launch {
             loading = true
-
             try {
                 messagelist.add(Response(question, "User"))
 
@@ -321,16 +341,28 @@ class veltrixviewmodel : ViewModel(){
                     return@launch
                 }
 
+                val history = messagelist
+                    .takeLast(10)
+                    .dropLast(1)
+                    .joinToString("\n") {
+                        if (it.Role == "User") "User: ${it.message}"
+                        else "Assistant: ${it.message}"
+                    }
+
+                val prompt = if (history.isNotEmpty()) {
+                    "$history\nUser: $question\nAssistant:"
+                } else {
+                    "User: $question\nAssistant:"
+                }
+
                 val reply = withContext(Dispatchers.IO) {
-                    model.generateResponse(question)
+                    model.generateResponse(prompt)
                 }
 
                 messagelist.add(Response(reply, "Model"))
 
             } catch (e: Exception) {
-                messagelist.add(
-                    Response("Error: ${e.localizedMessage}", "Model")
-                )
+                messagelist.add(Response("Error: ${e.localizedMessage}", "Model"))
             } finally {
                 loading = false
             }
