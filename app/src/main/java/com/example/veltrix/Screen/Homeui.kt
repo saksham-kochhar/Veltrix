@@ -46,7 +46,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Divider
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -56,7 +55,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,15 +70,15 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.media3.exoplayer.offline.Download
+import androidx.navigation.NavController
+import androidx.navigation.NavHostController
 import com.example.veltrix.Instruction
+import com.example.veltrix.Navigation.Routes
 import com.example.veltrix.Response
 import com.example.veltrix.veltrixviewmodel
-import com.google.api.Context
 
 @Composable
-fun ChatbotScreen(viewmodel : veltrixviewmodel) {
+fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostController) {
 
     val activeColor by animateColorAsState(
         if (viewmodel.OnlineMode) Color(0xFF5B4DFF)
@@ -167,12 +165,12 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel) {
                         .clip(CircleShape)
                         .background(Color.White)
                         .clickable {
-                            //ACCOUNT SECTION
+                            navController.navigate(Routes.account)
+
                         },
 
                     contentAlignment = Alignment.Center
                 ) {
-
                     Icon(
                         imageVector = Icons.Outlined.Person,
                         contentDescription = "Profile",

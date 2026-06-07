@@ -6,7 +6,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.ViewModelProvider
 import com.example.veltrix.Navigation.navigation
-import com.example.veltrix.Screen.ChatbotScreen
 import com.example.veltrix.ui.theme.VeltrixTheme
 
 class MainActivity : ComponentActivity() {

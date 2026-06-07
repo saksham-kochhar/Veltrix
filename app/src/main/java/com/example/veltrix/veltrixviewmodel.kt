@@ -11,6 +11,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.navigation.NavController
+import androidx.navigation.NavHostController
 import com.google.firebase.auth.FirebaseAuth
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import kotlinx.coroutines.Dispatchers
@@ -182,6 +184,7 @@ class veltrixviewmodel : ViewModel(){
     fun signout() {
         auth.signOut()
         _authstate.value = Authstate.Unauthenticated
+
     }
     fun resetState() {
         _authstate.value = Authstate.Unauthenticated

@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.veltrix.Screen.AccountScreen
 import com.example.veltrix.Screen.AuthScreen
 import com.example.veltrix.Screen.ChatbotScreen
 import com.example.veltrix.Screen.VerificationScreen
@@ -18,10 +19,13 @@ fun navigation(viewModel: veltrixviewmodel){
             AuthScreen(viewModel = viewModel , navController = navController)
         }
         composable(Routes.Home) {
-            ChatbotScreen(viewmodel = viewModel )
+            ChatbotScreen(viewmodel = viewModel, navController )
         }
         composable(Routes.verification) {
             VerificationScreen(viewModel = viewModel , navController)
+        }
+        composable(Routes.account) {
+            AccountScreen(navController , viewModel)
         }
     }
 }
