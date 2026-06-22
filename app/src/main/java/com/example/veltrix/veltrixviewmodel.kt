@@ -11,18 +11,21 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.navigation.NavController
-import androidx.navigation.NavHostController
 import com.google.firebase.auth.FirebaseAuth
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.File
 
 class veltrixviewmodel : ViewModel(){
+    var firstname by mutableStateOf("")
+    var lastname by mutableStateOf("")
 
     var email by mutableStateOf("")
 
@@ -40,13 +43,16 @@ class veltrixviewmodel : ViewModel(){
 
     var OnlineMode by mutableStateOf(true)
 
+
+    private val _userProfile = MutableStateFlow<UserProfile?>(null)
+    val userProfile: StateFlow<UserProfile?> = _userProfile.asStateFlow()
+
     fun String.escapeJson(): String = this
         .replace("\\", "\\\\")
         .replace("\"", "\\\"")
         .replace("\n", "\\n")
         .replace("\r", "\\r")
         .replace("\t", "\\t")
-
 
 
     fun sendmessage(question: String) {
@@ -122,7 +128,10 @@ class veltrixviewmodel : ViewModel(){
         when {
             user == null -> _authstate.value = Authstate.Unauthenticated
             !user.isEmailVerified -> _authstate.value = Authstate.VerificationSent
-            else -> _authstate.value = Authstate.Authenticated
+            else -> {
+                _authstate.value = Authstate.Loading  // show loading while Firestore fetches
+                loadOrCreateUserProfile(user.uid, user.email ?: "")
+            }
         }
     }
 
@@ -133,8 +142,7 @@ class veltrixviewmodel : ViewModel(){
             if (task.isSuccessful) {
                 val user = auth.currentUser
                 if (user?.isEmailVerified == true) {
-                    createUserProfileIfNotExists(user.uid, email)
-                    _authstate.value = Authstate.Authenticated
+                    loadOrCreateUserProfile(user.uid, email)
                 } else {
                     auth.signOut()
                     _authstate.value = Authstate.EmailNotVerified
@@ -190,22 +198,52 @@ class veltrixviewmodel : ViewModel(){
         _authstate.value = Authstate.Unauthenticated
     }
 
-    private fun createUserProfileIfNotExists(uid: String, email: String) {
+    private fun loadOrCreateUserProfile(uid: String, email: String) {
         val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
         val userRef = db.collection("users").document(uid)
 
         userRef.get().addOnSuccessListener { document ->
-            if (!document.exists()) {
-                userRef.set(
-                    mapOf(
-                        "email" to email,
-                        "plan" to "free",
-                        "callsUsed" to 0,
-                        "callsLimit" to 15
-                    )
-                )
+            if (document.exists()) {
+                val profile = document.toObject(UserProfile::class.java)
+                _userProfile.value = profile
+                _authstate.value = if (profile?.onboardcomplete == true)
+                    Authstate.Authenticated else Authstate.ProfileIncomplete
+            } else {
+                val newProfile = UserProfile(email = email, firstname = firstname, lastname = lastname)
+                userRef.set(newProfile)
+                    .addOnSuccessListener {
+                        _userProfile.value = newProfile
+                        _authstate.value = Authstate.ProfileIncomplete
+                    }
+                    .addOnFailureListener {
+                        _userProfile.value = null
+                        _authstate.value = Authstate.Error("Failed to load profile")
+                    }
             }
+        }.addOnFailureListener {
+            _userProfile.value = null
+            _authstate.value = Authstate.Error("Failed to load profile")
         }
+    }
+
+    fun completeOnboarding(plan: String, onDone: () -> Unit) {
+        val uid = auth.currentUser?.uid ?: return
+        com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            .collection("users").document(uid)
+            .update(mapOf(
+                "firstname" to firstname,
+                "lastname" to lastname,
+                "plan" to plan,
+                "onboardcomplete" to true
+            ))
+            .addOnSuccessListener {
+                _userProfile.value = _userProfile.value?.copy(
+                    firstname = firstname, lastname = lastname,
+                    plan = plan, onboardcomplete = true
+                )
+                _authstate.value = Authstate.Authenticated
+                onDone()
+            }
     }
 
     fun openEmailApp(context: Context) {
@@ -232,8 +270,8 @@ class veltrixviewmodel : ViewModel(){
                 try {
                     auth.currentUser?.reload()?.await()
                     if (auth.currentUser?.isEmailVerified == true) {
-                        createUserProfileIfNotExists(auth.currentUser!!.uid, email)
-                        _authstate.value = Authstate.Authenticated
+                        loadOrCreateUserProfile(auth.currentUser!!.uid, email)
+
                         break
                     }
                 } catch (e: Exception) {
@@ -379,4 +417,15 @@ sealed class Authstate{
     data class Error(val message : String) : Authstate()
     object VerificationSent : Authstate()
     object EmailNotVerified : Authstate()
+    object ProfileIncomplete : Authstate()
 }
+
+data class UserProfile(
+    val email: String = "",
+    val firstname: String = "",
+    val lastname : String = "",
+    val plan: String = "",
+    val callsUsed: Int = 0,
+    val callsLimit: Int = 15,
+    val onboardcomplete : Boolean = false
+)

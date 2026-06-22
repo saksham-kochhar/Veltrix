@@ -49,10 +49,14 @@ fun VerificationScreen(viewModel: veltrixviewmodel, navController: NavHostContro
         viewModel.startVerificationPolling()
     }
     LaunchedEffect(authstate) {
-        if (authstate is Authstate.Authenticated) {
-            navController.navigate(Routes.Home) {
+        when (authstate) {
+            is Authstate.Authenticated -> navController.navigate(Routes.Home) {
                 popUpTo(0) { inclusive = true }
             }
+            is Authstate.ProfileIncomplete -> navController.navigate(Routes.details) {
+                popUpTo(0) { inclusive = true }
+            }
+            else -> {}
         }
     }
     val context = LocalContext.current

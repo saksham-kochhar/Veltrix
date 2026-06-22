@@ -5,4 +5,5 @@ object Routes {
     val Auth = "Authentication"
     val verification = "verfication"
     val account = "Account"
+    val details = "Details"
 }

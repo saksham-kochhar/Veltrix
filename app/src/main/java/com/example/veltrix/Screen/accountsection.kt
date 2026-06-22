@@ -1,12 +1,9 @@
 package com.example.veltrix.Screen
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,44 +19,39 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.filled.ArrowBackIosNew
-import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Security
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import com.example.veltrix.Navigation.Routes
-import com.example.veltrix.R
 import com.example.veltrix.veltrixviewmodel
 
 @Composable
 fun AccountScreen(navcontroller : NavHostController , viewmodel : veltrixviewmodel) {
+    val profile by viewmodel.userProfile.collectAsState()
 
     val menuItems = listOf(
         AccountMenuItem(
@@ -97,7 +89,7 @@ fun AccountScreen(navcontroller : NavHostController , viewmodel : veltrixviewmod
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = 40.dp)
-                .background(Color(0xFFF8F8F8)),
+                .background(Color(0xFFF8F8F8))
         ) {
             item {
                 Row(
@@ -146,37 +138,12 @@ fun AccountScreen(navcontroller : NavHostController , viewmodel : veltrixviewmod
                     )
                 ) {
                     Column(
-                        modifier = Modifier.padding(20.dp)
+                        modifier = Modifier.padding(10.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-
-                            Box {
-                                Image(
-                                    painter = painterResource(id = R.drawable.ic_launcher_foreground),
-                                    contentDescription = "Profile Photo",
-                                    modifier = Modifier
-                                        .size(90.dp)
-                                        .clip(CircleShape)
-                                )
-
-                                FloatingActionButton(
-                                    onClick = {},
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .align(Alignment.BottomEnd),
-                                    containerColor = Color(0xFF22C55E)
-                                ) {
-                                    Icon(
-                                        Icons.Default.CameraAlt,
-                                        null,
-                                        tint = Color.White
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.width(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
 
                             Column(
                                 modifier = Modifier.weight(1f)
@@ -185,57 +152,23 @@ fun AccountScreen(navcontroller : NavHostController , viewmodel : veltrixviewmod
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        "Saksham Kochhar",
+                                        "${profile?.firstname} ${profile?.lastname}" ,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 22.sp
                                     )
 
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .size(30.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF22C55E))
-                                            .clickable { /* Enter Name */ },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Edit,
-                                            null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-
                                 }
 
                                 Spacer(modifier = Modifier.height(4.dp))
 
                                 Text(
-                                    text = "exampleemail123@gmail.com",
+                                    text = profile?.email ?: "Unable to Fetch Details",
                                     color = Color.Gray
                                 )
 
                                 Spacer(modifier = Modifier.height(8.dp))
-
-                                AssistChip(
-                                    onClick = {},
-                                    label = {
-                                        Text("Free Mode")
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.Star,
-                                            null
-                                        )
-                                    }
-                                )
                             }
-
-                            Icon(
-                                Icons.Default.KeyboardArrowRight,
-                                null
-                            )
                         }
 
                         Spacer(modifier = Modifier.height(20.dp))

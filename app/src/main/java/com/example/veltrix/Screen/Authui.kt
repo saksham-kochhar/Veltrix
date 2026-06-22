@@ -101,6 +101,9 @@ fun AuthScreen(
             is Authstate.Authenticated -> navController.navigate(Routes.Home) {
                 popUpTo(0) { inclusive = true }
             }
+            is Authstate.ProfileIncomplete -> navController.navigate(Routes.details) {
+                popUpTo(0) { inclusive = true }
+            }
             is Authstate.VerificationSent -> navController.navigate(Routes.verification) {
                 popUpTo(Routes.Auth) { inclusive = false }
             }
@@ -292,7 +295,10 @@ fun AuthScreen(
                         else -> viewModel.signup(viewModel.email, password)
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Transparent,
+                    disabledContainerColor = Color.Transparent
+                ),
                 contentPadding = PaddingValues(),
                 modifier = Modifier.fillMaxWidth().height(62.dp),
                 enabled = password.length in 8..20 && !isLoading
@@ -301,8 +307,15 @@ fun AuthScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
-                            Brush.horizontalGradient(listOf(Color(0xFF5A4CFF), Color(0xFF6D57FF))),
-                            RoundedCornerShape(18.dp)
+                            brush = if (
+                                password.length in 8..20 &&
+                                !isLoading &&
+                                (if (selectedTab == 1) confirmPassword.length in 8..20 else true)
+                            )
+                                Brush.horizontalGradient(listOf(Color(0xFF5A4CFF), Color(0xFF6D57FF)))
+                            else
+                                Brush.horizontalGradient(listOf(Color(0xFF555555), Color(0xFF555555))),
+                            shape = RoundedCornerShape(18.dp)
                         ),
                     contentAlignment = Alignment.Center
                 ) {
