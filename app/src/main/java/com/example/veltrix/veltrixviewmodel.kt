@@ -427,5 +427,6 @@ data class UserProfile(
     val plan: String = "",
     val callsUsed: Int = 0,
     val callsLimit: Int = 15,
-    val onboardcomplete : Boolean = false
+    val onboardcomplete : Boolean = false,
+    val selectedplan : String = ""
 )

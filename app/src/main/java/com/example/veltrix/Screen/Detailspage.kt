@@ -85,10 +85,7 @@ fun PlanSelectionScreen(viewmodel : veltrixviewmodel , navController: NavHostCon
             color = Color(0xFFFF8A00)
         )
     )
-
-    var selectedPlan by remember {
-        mutableStateOf(plans[0])
-    }
+    var selectedPlan by remember { mutableStateOf(plans[0]) }
 
     Column(
         modifier = Modifier
@@ -276,9 +273,9 @@ fun PlanSelectionScreen(viewmodel : veltrixviewmodel , navController: NavHostCon
 
         Button(
             onClick = {
-                viewmodel.completeOnboarding(selectedPlan.name) {
+                viewmodel.completeOnboarding(selectedPlan.name.lowercase()) {
                     navController.navigate(Routes.Home) {
-                        popUpTo(0) { inclusive = true }
+                        popUpTo(0) { inclusive = true}
                     }
                 }
             },
