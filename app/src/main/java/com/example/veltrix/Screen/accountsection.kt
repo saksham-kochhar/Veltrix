@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
@@ -22,17 +23,19 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Redeem
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -43,6 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -53,12 +57,7 @@ import com.example.veltrix.veltrixviewmodel
 fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel) {
     val profile by viewmodel.userProfile.collectAsState()
     val plan = profile?.plan?.lowercase() ?: "free"
-
-    val planCardBg = when (plan) {
-        "pro" -> Color(0xFFE0F2FE)
-        "ultra" -> Color(0xFFEAF8EE)
-        else -> Color(0xFFF3E8FF)
-    }
+    val fullName = "${profile?.firstname.orEmpty()} ${profile?.lastname.orEmpty()}".trim()
 
     val menuItems = listOf(
         AccountMenuItem(
@@ -96,261 +95,340 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel)
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = 40.dp)
             .background(Color(0xFFF8F8F8))
+            .padding(horizontal = 20.dp)
     ) {
         item {
+            Spacer(modifier = Modifier.height(16.dp))
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 4.dp)
+                Surface(
+                    onClick = { navcontroller.popBackStack() },
+                    shape = CircleShape,
+                    color = Color.White,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier.size(44.dp)
                 ) {
-                    IconButton(
-                        onClick = { navcontroller.popBackStack() },
-                        modifier = Modifier.align(Alignment.CenterStart)
-                    ) {
-                        Icon(Icons.Default.ArrowBackIosNew, null)
-                    }
-
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.align(Alignment.Center)
-                    ) {
-                        Text(
-                            text = "Account",
-                            fontSize = 32.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        )
-                        Text(
-                            text = "Manage your profile and preferences",
-                            color = Color.Gray
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.ArrowBackIosNew,
+                            contentDescription = "Back",
+                            modifier = Modifier.size(18.dp),
+                            tint = Color(0xFF555555)
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(28.dp))
+
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .size(140.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFE9FFF0))
+                    )
+                    ProfileAvatar(
+                        firstName = profile?.firstname,
+                        lastName = profile?.lastname,
+                        size = 108.dp,
+                        fontSize = 38.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = "Account",
+                fontSize = 32.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+                color = Color(0xFF111133)
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = "Manage your profile and preferences",
+                color = Color.Gray,
+                fontSize = 15.sp,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(28.dp))
         }
 
         item {
             Card(
                 shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White)
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Spacer(modifier = Modifier.width(8.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    "${profile?.firstname} ${profile?.lastname}",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 22.sp
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                            }
-
-                            Spacer(modifier = Modifier.height(4.dp))
-
-                            Text(
-                                text = profile?.email ?: "Unable to Fetch Details",
-                                color = Color.Gray
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = planCardBg),
-                        shape = RoundedCornerShape(18.dp)
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { }
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            when (plan) {
-                                "free" -> {
-                                    Icon(
-                                        Icons.Default.Redeem,
-                                        null,
-                                        tint = Color(0xFFA326D9)
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            "You're on Free",
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF8543C0)
-                                        )
-                                        Text(
-                                            "Upgrade for a better experience",
-                                            color = Color.Gray
-                                        )
-                                    }
-                                }
-
-                                "pro" -> {
-                                    Icon(
-                                        Icons.Default.AutoAwesome,
-                                        null,
-                                        tint = Color(0xFF22ADC5)
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            "You're on Pro",
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF2BA5A8)
-                                        )
-                                        Text(
-                                            "Enjoy all Pro features",
-                                            color = Color.Gray
-                                        )
-                                    }
-                                }
-
-                                "ultra" -> {
-                                    Icon(
-                                        Icons.Default.Diamond,
-                                        null,
-                                        tint = Color(0xFF22C55E)
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            "You're on Ultra",
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF16A34A)
-                                        )
-                                        Text(
-                                            "Enjoy all Premiumm features",
-                                            color = Color.Gray
-                                        )
-                                    }
-                                }
-                            }
-
-                            OutlinedButton(onClick = {}) {
-                                Text("View Plan")
-                            }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = fullName.ifEmpty { "User" },
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 20.sp,
+                                color = Color(0xFF111133)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = profile?.email ?: "Unable to fetch details",
+                                color = Color.Gray,
+                                fontSize = 14.sp
+                            )
                         }
+                        Icon(
+                            Icons.Default.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = Color(0xFFBBBBBB)
+                        )
                     }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    PlanStatusBanner(plan = plan)
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(28.dp))
         }
 
         item {
             Text(
                 text = "Account",
                 fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
+                fontSize = 18.sp,
+                color = Color(0xFF111133)
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(14.dp))
         }
 
-        item {
-            Card(
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White)
-            ) {
-                menuItems.forEachIndexed { index, item ->
-                    AccountMenuRow(item)
-                    if (index != menuItems.lastIndex) {
-                        HorizontalDivider()
-                    }
-                }
+        items(menuItems.size) { index ->
+            AccountMenuRow(menuItems[index])
+            if (index != menuItems.lastIndex) {
+                Spacer(modifier = Modifier.height(10.dp))
             }
-
-            Spacer(modifier = Modifier.height(24.dp))
         }
 
         item {
+            Spacer(modifier = Modifier.height(24.dp))
+
             Card(
                 shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3F3))
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3F3)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clickable {
+                            viewmodel.signout()
+                            navcontroller.navigate(Routes.Auth) {
+                                popUpTo(0) { inclusive = true }
+                            }
+                        }
                         .padding(20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        Icons.AutoMirrored.Outlined.Logout,
-                        null,
-                        tint = Color.Red
-                    )
-
-                    Spacer(modifier = Modifier.width(16.dp))
-
-                    Column(
+                    Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(2.dp))
-                            .clickable {
-                                viewmodel.signout()
-                                navcontroller.navigate(Routes.Auth) {
-                                    popUpTo(0) { inclusive = true }
-                                }
-                            }
+                            .size(50.dp)
+                            .background(Color(0xFFFFE5E5), RoundedCornerShape(14.dp)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            "Log Out",
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Red
-                        )
-                        Text(
-                            "Sign out from your account",
-                            color = Color.Gray
+                        Icon(
+                            Icons.AutoMirrored.Outlined.Logout,
+                            contentDescription = null,
+                            tint = Color(0xFFE53935)
                         )
                     }
 
-                    Icon(Icons.Default.KeyboardArrowRight, null)
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Log Out",
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFE53935)
+                        )
+                        Text(
+                            "Sign out from your account",
+                            color = Color.Gray,
+                            fontSize = 13.sp
+                        )
+                    }
+
+                    Icon(
+                        Icons.Default.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = Color(0xFFBBBBBB)
+                    )
                 }
             }
+
+            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }
 
 @Composable
-fun AccountMenuRow(item: AccountMenuItem) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(18.dp),
-        verticalAlignment = Alignment.CenterVertically
+private fun PlanStatusBanner(plan: String) {
+    val (bannerBg, accentColor, title, subtitle, icon) = when (plan) {
+        "pro" -> PlanBannerStyle(
+            bannerBg = Color(0xFFE9FFF0),
+            accentColor = Color(0xFF00A651),
+            title = "You're on Pro",
+            subtitle = "Enjoy all Pro features",
+            icon = Icons.Default.WorkspacePremium
+        )
+
+        "ultra" -> PlanBannerStyle(
+            bannerBg = Color(0xFFEAF8EE),
+            accentColor = Color(0xFF16A34A),
+            title = "You're on Ultra",
+            subtitle = "Enjoy all Premium features",
+            icon = Icons.Default.Diamond
+        )
+
+        else -> PlanBannerStyle(
+            bannerBg = Color(0xFFF3E8FF),
+            accentColor = Color(0xFF8543C0),
+            title = "You're on Free",
+            subtitle = "Upgrade for a better experience",
+            icon = Icons.Default.Redeem
+        )
+    }
+
+    Surface(
+        color = bannerBg,
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Box(
+        Row(
             modifier = Modifier
-                .size(50.dp)
-                .background(Color(0xFFEAF8EE), RoundedCornerShape(14.dp)),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(item.icon, null, tint = Color(0xFF16A34A))
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Color.White),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (plan == "pro") Icons.Default.AutoAwesome else icon,
+                    contentDescription = null,
+                    tint = accentColor,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(14.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontWeight = FontWeight.Bold,
+                    color = accentColor,
+                    fontSize = 16.sp
+                )
+                Text(
+                    text = subtitle,
+                    color = accentColor.copy(alpha = 0.75f),
+                    fontSize = 13.sp
+                )
+            }
+
+            Button(
+                onClick = {},
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                contentPadding = ButtonDefaults.ContentPadding
+            ) {
+                Text(
+                    text = "View Plan",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
+    }
+}
 
-        Spacer(modifier = Modifier.width(16.dp))
+private data class PlanBannerStyle(
+    val bannerBg: Color,
+    val accentColor: Color,
+    val title: String,
+    val subtitle: String,
+    val icon: ImageVector
+)
 
-        Column(modifier = Modifier.weight(1f)) {
-            Text(item.title, fontWeight = FontWeight.SemiBold)
-            Text(item.subtitle, color = Color.Gray, fontSize = 13.sp)
+@Composable
+fun AccountMenuRow(item: AccountMenuItem) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { }
+                .padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(50.dp)
+                    .background(Color(0xFFEAF8EE), RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(item.icon, contentDescription = null, tint = Color(0xFF16A34A))
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    item.title,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF111133)
+                )
+                Text(item.subtitle, color = Color.Gray, fontSize = 13.sp)
+            }
+
+            Icon(
+                Icons.Default.KeyboardArrowRight,
+                contentDescription = null,
+                tint = Color(0xFFBBBBBB)
+            )
         }
-
-        Icon(Icons.Default.KeyboardArrowRight, null)
     }
 }
 

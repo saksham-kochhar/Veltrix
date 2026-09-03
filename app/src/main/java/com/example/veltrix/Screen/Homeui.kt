@@ -9,6 +9,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Storage
@@ -40,24 +42,29 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Mic
-import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DividerDefaults
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,7 +72,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -75,7 +84,10 @@ import androidx.navigation.NavHostController
 import com.example.veltrix.Instruction
 import com.example.veltrix.Navigation.Routes
 import com.example.veltrix.Response
+import com.example.veltrix.isLimitExhaustedMessage
+import com.example.veltrix.chathistorry.ChatHistoryDrawerContent
 import com.example.veltrix.veltrixviewmodel
+import kotlinx.coroutines.launch
 
 @Composable
 fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostController) {
@@ -87,6 +99,7 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
     )
      var question by remember { mutableStateOf("") }
     var selectedMode by remember { mutableStateOf<String?>(null) }
+    val profile by viewmodel.userProfile.collectAsState()
     val modeColor = when (selectedMode) {
         "Brainstorm" -> Color(0xFF7C4DFF)
         "Learn" -> Color(0xFFFF9800)
@@ -94,28 +107,47 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
         else -> Color(0xFFF5F5FA)
     }
     val context = LocalContext.current
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
 
+    LaunchedEffect(Unit) {
+        viewmodel.initChatHistory(context)
+        viewmodel.refreshModelStatus(context)
+        if (viewmodel.isModelDownloaded) {
+            viewmodel.loadLocalModel(context)
+        }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ChatHistoryDrawerContent(
+                sessions = viewmodel.sessionSummaries.toList(),
+                currentSessionId = viewmodel.currentSessionId,
+                statusMessage = viewmodel.historyStatusMessage,
+                onNewChat = {
+                    viewmodel.startNewChat(context)
+                    scope.launch { drawerState.close() }
+                },
+                onOpenSession = { id ->
+                    viewmodel.openSession(context, id)
+                    scope.launch { drawerState.close() }
+                },
+                onClose = {
+                    scope.launch { drawerState.close() }
+                }
+            )
+        }
+    ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = modeColor.copy(alpha = 0.06f)
     ) {
-        LaunchedEffect(Unit) {
-            viewmodel.refreshModelStatus(context)
-        }
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 20.dp)
         ) {
-            LaunchedEffect(Unit) {
-                viewmodel.refreshModelStatus(context)
-
-                if (viewmodel.isModelDownloaded) {
-                    viewmodel.loadLocalModel(context)
-                }
-            }
-
             Spacer(modifier = Modifier.height(40.dp))
 
             Row(
@@ -125,11 +157,11 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
             ) {
 
                 IconButton(onClick = {
-                    //meNU CONNECT
+                    scope.launch { drawerState.open() }
                 }) {
                     Icon(
                         imageVector = Icons.Outlined.Menu,
-                        contentDescription = null,
+                        contentDescription = "Chat history",
                         tint = Color(0xFF1C1C3A)
                     )
                 }
@@ -163,18 +195,15 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
                     modifier = Modifier
                         .size(50.dp)
                         .clip(CircleShape)
-                        .background(Color.White)
                         .clickable {
                             navController.navigate(Routes.account)
-
-                        },
-
-                    contentAlignment = Alignment.Center
+                        }
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Person,
-                        contentDescription = "Profile",
-                        tint = Color(0xFF1C1C3A)
+                    ProfileAvatar(
+                        firstName = profile?.firstname,
+                        lastName = profile?.lastname,
+                        size = 50.dp,
+                        fontSize = 18.sp
                     )
                 }
             }
@@ -247,7 +276,10 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
             ) {
                 MessageList(
                     messageList = viewmodel.messagelist,
-                    isLoading = viewmodel.loading
+                    isLoading = viewmodel.loading,
+                    isModelDownloaded = viewmodel.isModelDownloaded,
+                    isOfflineMode = !viewmodel.OnlineMode,
+                    onSwitchToOffline = { viewmodel.switchToOfflineMode(context) }
                 )
             }
 
@@ -465,7 +497,8 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
                     .border(
                         1.dp,
                         Color(0xFFEAEAF5),
-                        RoundedCornerShape(32.dp))
+                        RoundedCornerShape(32.dp)),
+                verticalAlignment = Alignment.CenterVertically
             ) {
 
                 IconButton(onClick = {
@@ -480,11 +513,19 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
                 BasicTextField(
                     value = question,
                     onValueChange = { question = it },
-                    modifier = Modifier.weight(1f).padding(vertical = 4.dp),
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
                     textStyle = TextStyle(fontSize = 16.sp, color = Color(0xFF111133)),
                     decorationBox = { inner ->
-                        if (question.isEmpty()) Text("Ask anything…", color = Color(0xFFBBBBCC), fontSize = 16.sp)
-                        inner()
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            if (question.isEmpty()) {
+                                Text("Ask anything…", color = Color(0xFFBBBBCC), fontSize = 16.sp)
+                            }
+                            inner()
+                        }
                     }
                 )
 
@@ -505,6 +546,7 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
                         .background(activeColor),
                     contentAlignment = Alignment.Center
                 ) { IconButton(onClick = {
+                    viewmodel.initChatHistory(context)
                     if(viewmodel.OnlineMode){
                     viewmodel.sendmessage(question)
                     question = ""}
@@ -522,6 +564,7 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
 
             Spacer(modifier = Modifier.height(16.dp))
         }
+    }
     }
 }
 
@@ -650,11 +693,15 @@ fun SuggestionCard(
 @Composable
 fun MessageList(
     messageList: List<Response>,
-    isLoading: Boolean = false
+    isLoading: Boolean = false,
+    isModelDownloaded: Boolean = false,
+    isOfflineMode: Boolean = false,
+    onSwitchToOffline: () -> Unit = {}
 ) {
     LazyColumn(
-        modifier = Modifier.fillMaxWidth(),
-        reverseLayout = true
+        modifier = Modifier.fillMaxSize(),
+        reverseLayout = true,
+        contentPadding = PaddingValues(vertical = 8.dp)
     ) {
         if (isLoading) {
             item {
@@ -666,13 +713,13 @@ fun MessageList(
                 ) {
                     Box(
                         modifier = Modifier
-                            .widthIn(max = 290.dp)
+                            .widthIn(max = (LocalConfiguration.current.screenWidthDp * 0.82f).dp)
                             .clip(
                                 RoundedCornerShape(
-                                    topStart = 24.dp,
-                                    topEnd = 24.dp,
+                                    topStart = 20.dp,
+                                    topEnd = 20.dp,
                                     bottomStart = 6.dp,
-                                    bottomEnd = 24.dp
+                                    bottomEnd = 20.dp
                                 )
                             )
                             .background(
@@ -680,7 +727,7 @@ fun MessageList(
                                     listOf(Color.White, Color(0xFFF9F9FD))
                                 )
                             )
-                            .padding(horizontal = 22.dp, vertical = 18.dp)
+                            .padding(horizontal = 16.dp, vertical = 14.dp)
                     ) {
                         TypingIndicator()
                     }
@@ -690,42 +737,65 @@ fun MessageList(
 
         items(messageList.reversed()) { message ->
             val isUser = message.Role == "User"
+            val isLimitMessage = message.isLimitExhaustedMessage()
+            val textColor = if (isUser) Color.White else Color(0xFF111133)
+            val maxBubbleWidth = (LocalConfiguration.current.screenWidthDp * 0.82f).dp
 
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 6.dp),
-                horizontalArrangement =
-                    if (isUser) Arrangement.End else Arrangement.Start
+                    .padding(vertical = 6.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .widthIn(max = 290.dp)
-                        .clip(
-                            RoundedCornerShape(
-                                topStart = 24.dp,
-                                topEnd = 24.dp,
-                                bottomStart = if (isUser) 24.dp else 6.dp,
-                                bottomEnd = if (isUser) 6.dp else 24.dp
-                            )
-                        )
-                        .background(
-                            if (isUser)
-                                Brush.horizontalGradient(
-                                    listOf(Color(0xFF5B4DFF), Color(0xFF7B61FF))
-                                )
-                            else
-                                Brush.verticalGradient(
-                                    listOf(Color.White, Color(0xFFF9F9FD))
-                                )
-                        )
-                        .padding(18.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement =
+                        if (isUser) Arrangement.End else Arrangement.Start
                 ) {
-                    Text(
-                        text = message.message,
-                        color = if (isUser) Color.White else Color(0xFF111133),
-                        fontSize = 16.sp,
-                        lineHeight = 24.sp
+                    Box(
+                        modifier = Modifier
+                            .widthIn(max = maxBubbleWidth)
+                            .clip(
+                                RoundedCornerShape(
+                                    topStart = 20.dp,
+                                    topEnd = 20.dp,
+                                    bottomStart = if (isUser) 20.dp else 6.dp,
+                                    bottomEnd = if (isUser) 6.dp else 20.dp
+                                )
+                            )
+                            .background(
+                                if (isUser)
+                                    Brush.horizontalGradient(
+                                        listOf(Color(0xFF5B4DFF), Color(0xFF7B61FF))
+                                    )
+                                else
+                                    Brush.verticalGradient(
+                                        listOf(Color.White, Color(0xFFF9F9FD))
+                                    )
+                            )
+                            .padding(horizontal = 16.dp, vertical = 14.dp)
+                    ) {
+                        Text(
+                            text = if (isUser) {
+                                AnnotatedString(message.message)
+                            } else {
+                                parseChatMarkdown(
+                                    raw = message.message,
+                                    textColor = textColor,
+                                    codeBackgroundHint = Color(0xFFE0E0EA)
+                                )
+                            },
+                            color = textColor,
+                            fontSize = 15.sp,
+                            lineHeight = 22.sp,
+                            softWrap = true
+                        )
+                    }
+                }
+
+                if (isLimitMessage && !isOfflineMode) {
+                    OfflineLimitCard(
+                        isModelDownloaded = isModelDownloaded,
+                        onUseOffline = onSwitchToOffline
                     )
                 }
             }
@@ -733,6 +803,124 @@ fun MessageList(
     }
 }
 
+@Composable
+fun OfflineLimitCard(
+    isModelDownloaded: Boolean,
+    onUseOffline: () -> Unit
+) {
+    val offlineGreen = Color(0xFF00C853)
+    val offlineGreenLight = Color(0xFFE8FFF1)
+    val offlineGreenBanner = Color(0xFFE9FFF0)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(offlineGreenBanner),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Storage,
+                        contentDescription = null,
+                        tint = offlineGreen,
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Switch to Offline Model",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 22.sp,
+                        color = Color(0xFF111133)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Continue chatting without internet. Responses may take more time.",
+                        color = Color.Gray,
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Surface(
+                color = offlineGreenLight,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.WifiOff,
+                        contentDescription = null,
+                        tint = offlineGreen,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = if (isModelDownloaded) {
+                            "Offline mode is enabled on your device. No internet required."
+                        } else {
+                            "Download the model to chat without internet."
+                        },
+                        color = Color(0xFF007A3D),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = onUseOffline,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = offlineGreen)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.CloudOff,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "Use Offline Model",
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
+    }
+}
 @Composable
 fun TypingIndicator() {
     val dotCount = 3

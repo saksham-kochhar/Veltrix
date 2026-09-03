@@ -11,6 +11,22 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.veltrix.chathistorry.ChatHistoryStore
+import com.example.veltrix.chathistorry.ChatSession
+import com.example.veltrix.chathistorry.ChatSessionSummary
+import com.example.veltrix.chathistorry.SUMMARY_INSTRUCTION
+import com.example.veltrix.chathistorry.TITLE_INSTRUCTION
+import com.example.veltrix.chathistorry.buildInitialTitlePrompt
+import com.example.veltrix.chathistorry.buildRefinedTitlePrompt
+import com.example.veltrix.chathistorry.buildSummaryPrompt
+import com.example.veltrix.chathistorry.countUserMessages
+import com.example.veltrix.chathistorry.firstUserMessage
+import com.example.veltrix.chathistorry.heuristicTitle
+import com.example.veltrix.chathistorry.messagesUpToNthUser
+import com.example.veltrix.chathistorry.needsInitialTitle
+import com.example.veltrix.chathistorry.sanitizeSummary
+import com.example.veltrix.chathistorry.sanitizeTitle
+import com.example.veltrix.chathistorry.toSummary
 import com.google.firebase.auth.FirebaseAuth
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +38,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.UUID
 
 class veltrixviewmodel : ViewModel(){
     var firstname by mutableStateOf("")
@@ -43,6 +60,15 @@ class veltrixviewmodel : ViewModel(){
 
     var OnlineMode by mutableStateOf(true)
 
+    var currentSessionId by mutableStateOf(UUID.randomUUID().toString())
+        private set
+
+    val sessionSummaries = mutableStateListOf<ChatSessionSummary>()
+
+    var historyStatusMessage by mutableStateOf<String?>(null)
+
+    private var historyAppContext: Context? = null
+    private var chatHistoryInitialized = false
 
     private val _userProfile = MutableStateFlow<UserProfile?>(null)
     val userProfile: StateFlow<UserProfile?> = _userProfile.asStateFlow()
@@ -54,6 +80,310 @@ class veltrixviewmodel : ViewModel(){
         .replace("\r", "\\r")
         .replace("\t", "\\t")
 
+    fun initChatHistory(context: Context) {
+        historyAppContext = context.applicationContext
+        val uid = auth.currentUser?.uid ?: return
+        if (chatHistoryInitialized) return
+        chatHistoryInitialized = true
+        viewModelScope.launch {
+            val appContext = context.applicationContext
+            val local = withContext(Dispatchers.IO) {
+                ChatHistoryStore.loadLocal(appContext, uid)
+            }
+            mergeSummaries(local.map { it.toSummary(cachedLocally = true) })
+
+            try {
+                val snapshot = withContext(Dispatchers.IO) {
+                    ChatHistoryStore.chatsCollection(uid)
+                        .orderBy("updatedAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                        .get()
+                        .await()
+                }
+                val localIds = local.map { it.id }.toSet()
+                val remote = snapshot.documents.map { doc ->
+                    val data = (doc.data ?: emptyMap()).toMutableMap()
+                    data["id"] = doc.id
+                    ChatHistoryStore.summaryFromMap(
+                        data,
+                        cachedLocally = localIds.contains(doc.id)
+                    )
+                }
+                mergeSummaries(remote)
+            } catch (_: Exception) {
+                // Offline or Firestore unavailable — keep local list only
+            }
+        }
+    }
+
+    fun startNewChat(context: Context) {
+        val appContext = context.applicationContext
+        historyAppContext = appContext
+        if (messagelist.isNotEmpty()) {
+            persistCurrentSession(appContext)
+        }
+        messagelist.clear()
+        currentSessionId = UUID.randomUUID().toString()
+        historyStatusMessage = null
+    }
+
+    fun openSession(context: Context, sessionId: String) {
+        if (sessionId == currentSessionId) {
+            historyStatusMessage = null
+            return
+        }
+        val appContext = context.applicationContext
+        historyAppContext = appContext
+        val uid = auth.currentUser?.uid ?: return
+
+        viewModelScope.launch {
+            if (messagelist.isNotEmpty()) {
+                persistCurrentSession(appContext)
+            }
+
+            val localSession = withContext(Dispatchers.IO) {
+                ChatHistoryStore.findLocal(appContext, uid, sessionId)
+            }
+            if (localSession != null) {
+                applySession(localSession)
+                return@launch
+            }
+
+            try {
+                val doc = withContext(Dispatchers.IO) {
+                    ChatHistoryStore.chatsCollection(uid).document(sessionId).get().await()
+                }
+                if (!doc.exists()) {
+                    historyStatusMessage = "Chat not found"
+                    return@launch
+                }
+                val data = (doc.data ?: emptyMap()).toMutableMap()
+                data["id"] = doc.id
+                val session = ChatHistoryStore.sessionFromMap(data)
+                withContext(Dispatchers.IO) {
+                    ChatHistoryStore.upsertLocal(appContext, uid, session)
+                }
+                applySession(session)
+                val localIds = withContext(Dispatchers.IO) {
+                    ChatHistoryStore.loadLocal(appContext, uid).map { it.id }.toSet()
+                }
+                applyLocalFlags(localIds)
+            } catch (_: Exception) {
+                historyStatusMessage = "Connect to load this chat"
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(appContext, "Connect to load this chat", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    fun persistCurrentSession(context: Context) {
+        val uid = auth.currentUser?.uid ?: return
+        if (messagelist.isEmpty()) return
+        val appContext = context.applicationContext
+        historyAppContext = appContext
+
+        viewModelScope.launch {
+            val messages = messagelist.toList()
+            val existing = withContext(Dispatchers.IO) {
+                ChatHistoryStore.findLocal(appContext, uid, currentSessionId)
+            }
+            val metadata = resolveSessionMetadata(existing, messages)
+
+            val session = ChatSession(
+                id = currentSessionId,
+                title = metadata.title,
+                summary = metadata.summary,
+                lastMessage = messages.lastOrNull()?.message.orEmpty(),
+                updatedAt = System.currentTimeMillis(),
+                titleRefined = metadata.titleRefined,
+                messages = messages
+            )
+
+            withContext(Dispatchers.IO) {
+                ChatHistoryStore.upsertLocal(appContext, uid, session)
+                try {
+                    ChatHistoryStore.chatsCollection(uid)
+                        .document(session.id)
+                        .set(ChatHistoryStore.sessionToMap(session))
+                        .await()
+                } catch (_: Exception) {
+                    // Local cache still updated
+                }
+            }
+            upsertSummary(session.toSummary(cachedLocally = true))
+            val localIds = withContext(Dispatchers.IO) {
+                ChatHistoryStore.loadLocal(appContext, uid).map { it.id }.toSet()
+            }
+            applyLocalFlags(localIds)
+        }
+    }
+
+    private data class SessionMetadata(
+        val title: String,
+        val summary: String,
+        val titleRefined: Boolean
+    )
+
+    private suspend fun resolveSessionMetadata(
+        existing: ChatSession?,
+        messages: List<Response>
+    ): SessionMetadata {
+        var title = existing?.title.orEmpty()
+        var summary = existing?.summary.orEmpty()
+        var titleRefined = existing?.titleRefined ?: false
+        val userCount = countUserMessages(messages)
+
+        if (userCount >= 1 && needsInitialTitle(title)) {
+            val firstMsg = firstUserMessage(messages)
+            title = generateTitle(
+                instruction = TITLE_INSTRUCTION,
+                prompt = buildInitialTitlePrompt(firstMsg),
+                fallback = heuristicTitle(firstMsg)
+            )
+        }
+
+        if (userCount >= 10 && !titleRefined) {
+            val excerpt = messagesUpToNthUser(messages, 10)
+            val refined = generateTitle(
+                instruction = TITLE_INSTRUCTION,
+                prompt = buildRefinedTitlePrompt(excerpt),
+                fallback = title.ifBlank { heuristicTitle(firstUserMessage(messages)) }
+            )
+            if (refined.isNotBlank()) title = refined
+            titleRefined = true
+        }
+
+        if (userCount >= 20 && summary.isBlank()) {
+            val excerpt = messagesUpToNthUser(messages, 20)
+            summary = generateSummary(
+                prompt = buildSummaryPrompt(excerpt)
+            )
+        }
+
+        if (title.isBlank()) title = "New chat"
+        return SessionMetadata(title = title, summary = summary, titleRefined = titleRefined)
+    }
+
+    private suspend fun generateTitle(
+        instruction: String,
+        prompt: String,
+        fallback: String
+    ): String {
+        val raw = generateMetaText(instruction, prompt) ?: return fallback
+        val cleaned = sanitizeTitle(raw)
+        return cleaned.ifBlank { fallback }
+    }
+
+    private suspend fun generateSummary(prompt: String): String {
+        val raw = generateMetaText(SUMMARY_INSTRUCTION, prompt) ?: return ""
+        return sanitizeSummary(raw)
+    }
+
+    private suspend fun generateMetaText(instruction: String, prompt: String): String? {
+        if (OnlineMode) {
+            callOnlineMeta(instruction, prompt)?.let { return it }
+        }
+        return callOfflineMeta("$instruction\n\n$prompt")
+    }
+
+    private suspend fun callOnlineMeta(instruction: String, prompt: String): String? {
+        return try {
+            val idToken = auth.currentUser?.getIdToken(false)?.await()?.token ?: return null
+            withContext(Dispatchers.IO) {
+                val requestBody = """
+                    {
+                    "message": "${prompt.escapeJson()}",
+                    "history": [],
+                    "instruction": "${instruction.escapeJson()}"
+                    }
+                    """.trimIndent()
+
+                val url = java.net.URL("https://veltrix-backend-nmvy.onrender.com/chat")
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.setRequestProperty("Authorization", "Bearer $idToken")
+                connection.doOutput = true
+                connection.outputStream.write(requestBody.toByteArray())
+
+                when (connection.responseCode) {
+                    200 -> {
+                        val response = connection.inputStream.bufferedReader().readText()
+                        org.json.JSONObject(response).getString("reply").trim()
+                    }
+                    else -> null
+                }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private suspend fun callOfflineMeta(prompt: String): String? {
+        val model = llmInference ?: return null
+        return try {
+            withContext(Dispatchers.IO) {
+                model.generateResponse(prompt).trim()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun applySession(session: ChatSession) {
+        currentSessionId = session.id
+        messagelist.clear()
+        messagelist.addAll(session.messages)
+        historyStatusMessage = null
+        upsertSummary(session.toSummary(cachedLocally = true))
+    }
+
+    private fun mergeSummaries(incoming: List<ChatSessionSummary>) {
+        val byId = linkedMapOf<String, ChatSessionSummary>()
+        sessionSummaries.forEach { byId[it.id] = it }
+        incoming.forEach { next ->
+            val prev = byId[next.id]
+            byId[next.id] = if (prev == null) next else next.copy(
+                cachedLocally = prev.cachedLocally || next.cachedLocally,
+                title = if (next.updatedAt >= prev.updatedAt) next.title else prev.title,
+                summary = if (next.updatedAt >= prev.updatedAt) next.summary else prev.summary,
+                lastMessage = if (next.updatedAt >= prev.updatedAt) next.lastMessage else prev.lastMessage,
+                updatedAt = maxOf(prev.updatedAt, next.updatedAt)
+            )
+        }
+        sessionSummaries.clear()
+        sessionSummaries.addAll(byId.values.sortedByDescending { it.updatedAt })
+    }
+
+    private fun upsertSummary(summary: ChatSessionSummary) {
+        val index = sessionSummaries.indexOfFirst { it.id == summary.id }
+        if (index >= 0) sessionSummaries[index] = summary else sessionSummaries.add(summary)
+        sessionSummaries.sortByDescending { it.updatedAt }
+    }
+
+    private fun applyLocalFlags(localIds: Set<String>) {
+        for (i in sessionSummaries.indices) {
+            val s = sessionSummaries[i]
+            sessionSummaries[i] = s.copy(cachedLocally = localIds.contains(s.id))
+        }
+    }
+
+    private fun clearChatHistoryState() {
+        messagelist.clear()
+        sessionSummaries.clear()
+        currentSessionId = UUID.randomUUID().toString()
+        chatHistoryInitialized = false
+        historyStatusMessage = null
+        historyAppContext = null
+    }
+
+    fun switchToOfflineMode(context: Context) {
+        OnlineMode = false
+        refreshModelStatus(context)
+        if (isModelDownloaded) {
+            loadLocalModel(context)
+        }
+    }
 
     fun sendmessage(question: String) {
         viewModelScope.launch {
@@ -78,11 +408,12 @@ class veltrixviewmodel : ViewModel(){
                     val requestBody = """
                         {
                         "message": "${question.escapeJson()}",
-                        "history": [$history]
+                        "history": [$history],
+                        "instruction": "${instruction.escapeJson()}"
                         }
                         """.trimIndent()
 
-                    val url = java.net.URL("https://veltrix-backend-production.up.railway.app/chat")
+                    val url = java.net.URL("https://veltrix-backend-nmvy.onrender.com/chat")
                     val connection = url.openConnection() as java.net.HttpURLConnection
                     connection.requestMethod = "POST"
                     connection.setRequestProperty("Content-Type", "application/json")
@@ -95,7 +426,7 @@ class veltrixviewmodel : ViewModel(){
                             val response = connection.inputStream.bufferedReader().readText()
                             org.json.JSONObject(response).getString("reply")
                         }
-                        429 -> "You have reached your free limit. You can still use offline model"
+                        429 -> LIMIT_EXHAUSTED_MESSAGE
                         else -> {
                             val error = connection.errorStream?.bufferedReader()?.readText()
                             "Error ${connection.responseCode}: $error"
@@ -104,9 +435,11 @@ class veltrixviewmodel : ViewModel(){
                 }
 
                 messagelist.add(Response(reply, "Model"))
+                historyAppContext?.let { persistCurrentSession(it) }
 
             } catch (e: Exception) {
                 messagelist.add(Response("Error: ${e.message}", "Model"))
+                historyAppContext?.let { persistCurrentSession(it) }
             } finally {
                 loading = false
             }
@@ -190,9 +523,13 @@ class veltrixviewmodel : ViewModel(){
     }
 
     fun signout() {
+        historyAppContext?.let { ctx ->
+            if (messagelist.isNotEmpty()) persistCurrentSession(ctx)
+        }
         auth.signOut()
+        clearChatHistoryState()
+        _userProfile.value = null
         _authstate.value = Authstate.Unauthenticated
-
     }
     fun resetState() {
         _authstate.value = Authstate.Unauthenticated
@@ -390,20 +727,23 @@ class veltrixviewmodel : ViewModel(){
                         else "Assistant: ${it.message}"
                     }
 
-                val prompt = if (history.isNotEmpty()) {
+                val conversation = if (history.isNotEmpty()) {
                     "$history\nUser: $question\nAssistant:"
                 } else {
                     "User: $question\nAssistant:"
                 }
+                val prompt = "${instruction.trim()}\n\n$conversation"
 
                 val reply = withContext(Dispatchers.IO) {
                     model.generateResponse(prompt)
                 }
 
                 messagelist.add(Response(reply, "Model"))
+                historyAppContext?.let { persistCurrentSession(it) }
 
             } catch (e: Exception) {
                 messagelist.add(Response("Error: ${e.localizedMessage}", "Model"))
+                historyAppContext?.let { persistCurrentSession(it) }
             } finally {
                 loading = false
             }
