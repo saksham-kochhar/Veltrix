@@ -463,7 +463,8 @@ class veltrixviewmodel : ViewModel(){
             !user.isEmailVerified -> _authstate.value = Authstate.VerificationSent
             else -> {
                 _authstate.value = Authstate.Loading  // show loading while Firestore fetches
-                loadOrCreateUserProfile(user.uid, user.email ?: "")
+                email = user.email ?: ""
+                loadOrCreateUserProfile(user.uid, email)
             }
         }
     }
@@ -475,7 +476,8 @@ class veltrixviewmodel : ViewModel(){
             if (task.isSuccessful) {
                 val user = auth.currentUser
                 if (user?.isEmailVerified == true) {
-                    loadOrCreateUserProfile(user.uid, email)
+                    this.email = user.email ?: email
+                    loadOrCreateUserProfile(user.uid, this.email)
                 } else {
                     auth.signOut()
                     _authstate.value = Authstate.EmailNotVerified
@@ -533,6 +535,30 @@ class veltrixviewmodel : ViewModel(){
     }
     fun resetState() {
         _authstate.value = Authstate.Unauthenticated
+    }
+
+    fun setError(message: String) {
+        _authstate.value = Authstate.Error(message)
+    }
+
+    fun signInWithGoogle(idToken: String) {
+        _authstate.value = Authstate.Loading
+        val credential = com.google.firebase.auth.GoogleAuthProvider.getCredential(idToken, null)
+        auth.signInWithCredential(credential).addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                val user = auth.currentUser ?: return@addOnCompleteListener
+                email = user.email ?: ""
+                // Pre-fill name from Google profile so the onboarding fields aren't blank
+                val nameParts = user.displayName?.trim()?.split(" ") ?: emptyList()
+                if (nameParts.isNotEmpty() && firstname.isBlank()) firstname = nameParts.first()
+                if (nameParts.size > 1 && lastname.isBlank()) lastname = nameParts.drop(1).joinToString(" ")
+                loadOrCreateUserProfile(user.uid, email)
+            } else {
+                _authstate.value = Authstate.Error(
+                    task.exception?.message ?: "Google sign-in failed"
+                )
+            }
+        }
     }
 
     private fun loadOrCreateUserProfile(uid: String, email: String) {

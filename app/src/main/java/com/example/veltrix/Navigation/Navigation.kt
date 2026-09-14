@@ -12,21 +12,25 @@ import com.example.veltrix.Screen.VerificationScreen
 import com.example.veltrix.veltrixviewmodel
 
 @Composable
-fun navigation(viewModel: veltrixviewmodel){
+fun navigation(viewModel: veltrixviewmodel, onGoogleClick: () -> Unit) {
     val navController = rememberNavController()
-    NavHost(navController , startDestination = Routes.Auth){
+    NavHost(navController, startDestination = Routes.Auth) {
 
         composable(Routes.Auth) {
-            AuthScreen(viewModel = viewModel , navController = navController)
+            AuthScreen(
+                viewModel = viewModel,
+                navController = navController,
+                onGoogleClick = onGoogleClick
+            )
         }
         composable(Routes.Home) {
-            ChatbotScreen(viewmodel = viewModel, navController )
+            ChatbotScreen(viewmodel = viewModel, navController)
         }
         composable(Routes.verification) {
-            VerificationScreen(viewModel = viewModel , navController)
+            VerificationScreen(viewModel = viewModel, navController)
         }
         composable(Routes.account) {
-            AccountScreen(navController , viewModel)
+            AccountScreen(navController, viewModel)
         }
         composable(Routes.details) {
             PlanSelectionScreen(viewModel, navController)
