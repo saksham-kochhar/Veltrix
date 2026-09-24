@@ -53,6 +53,7 @@ import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Mic
@@ -198,10 +199,12 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
                 else -> selectedOnline?.tint ?: Color(0xFF5B4DFF)
             }
             val headerProviders = if (viewmodel.OnlineMode) {
-                AiModels.providersForAllowlist(viewmodel.allowedOnlineModelIds)
+                AiModels.providers
             } else {
                 listOf(AiModels.offlineProvider)
             }
+            val modelAccess = viewmodel.onlineModelAccess
+            val freeOnlyMode = viewmodel.walletSnapshot.freeOnlyMode
             val headerSelectedModelId = if (viewmodel.OnlineMode) {
                 selectedModelId
             } else {
@@ -266,6 +269,8 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
                     iconTint = modelIconTint,
                     providers = headerProviders,
                     selectedId = headerSelectedModelId,
+                    modelAccess = modelAccess,
+                    freeOnlyMode = freeOnlyMode,
                     onSelect = { modelId ->
                         if (viewmodel.OnlineMode) {
                             selectedModelId = modelId
@@ -586,6 +591,8 @@ fun HeaderModelSelector(
     iconTint: Color,
     providers: List<AiProvider>,
     selectedId: String,
+    modelAccess: Map<String, Boolean>?,
+    freeOnlyMode: Boolean,
     onSelect: (String) -> Unit
 ) {
     var showPicker by remember { mutableStateOf(false) }
@@ -603,6 +610,8 @@ fun HeaderModelSelector(
             sheetState = sheetState,
             providers = providers,
             selectedId = selectedId,
+            modelAccess = modelAccess,
+            freeOnlyMode = freeOnlyMode,
             onDismiss = { showPicker = false },
             onSelect = { modelId ->
                 onSelect(modelId)
@@ -618,6 +627,8 @@ fun ModelProviderSheet(
     sheetState: SheetState,
     providers: List<AiProvider>,
     selectedId: String,
+    modelAccess: Map<String, Boolean>?,
+    freeOnlyMode: Boolean,
     onDismiss: () -> Unit,
     onSelect: (String) -> Unit
 ) {
@@ -658,6 +669,8 @@ fun ModelProviderSheet(
                 ProviderAccordion(
                     provider = provider,
                     selectedId = selectedId,
+                    modelAccess = modelAccess,
+                    freeOnlyMode = freeOnlyMode,
                     expanded = expandedProviderId == provider.id,
                     onToggle = {
                         expandedProviderId =
@@ -675,10 +688,13 @@ fun ModelProviderSheet(
 fun ProviderAccordion(
     provider: AiProvider,
     selectedId: String,
+    modelAccess: Map<String, Boolean>?,
+    freeOnlyMode: Boolean,
     expanded: Boolean,
     onToggle: () -> Unit,
     onSelect: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val accent = Color(0xFF5B4DFF)
     val containsSelected = provider.models.any { it.id == selectedId }
     val rotation by animateFloatAsState(
@@ -745,10 +761,23 @@ fun ProviderAccordion(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 provider.models.forEach { model ->
+                    val allowed = AiModels.isModelAllowed(model.id, modelAccess)
                     ProviderModelRow(
                         model = model,
                         selected = model.id == selectedId,
-                        onClick = { onSelect(model.id) }
+                        allowed = allowed,
+                        freeOnlyMode = freeOnlyMode,
+                        onClick = {
+                            if (allowed) {
+                                onSelect(model.id)
+                            } else {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    AiModels.lockLabel(model.minTier, freeOnlyMode),
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
                     )
                 }
             }
@@ -760,14 +789,23 @@ fun ProviderAccordion(
 fun ProviderModelRow(
     model: AiModelOption,
     selected: Boolean,
+    allowed: Boolean,
+    freeOnlyMode: Boolean,
     onClick: () -> Unit
 ) {
     val accent = Color(0xFF5B4DFF)
+    val muted = Color(0xFFB0B0BC)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(if (selected) Color.White else Color.White.copy(alpha = 0.7f))
+            .background(
+                when {
+                    selected -> Color.White
+                    !allowed -> Color(0xFFF3F3F6)
+                    else -> Color.White.copy(alpha = 0.7f)
+                }
+            )
             .border(
                 width = if (selected) 1.5.dp else 1.dp,
                 color = if (selected) accent else Color(0xFFE8E8F0),
@@ -782,13 +820,26 @@ fun ProviderModelRow(
                 text = model.displayName,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                 fontSize = 15.sp,
-                color = Color(0xFF1A1A3A)
+                color = if (allowed) Color(0xFF1A1A3A) else muted
             )
             Text(
-                text = AiModels.tierLabel(model.minTier),
+                text = if (allowed) {
+                    AiModels.tierLabel(model.minTier)
+                } else {
+                    AiModels.lockLabel(model.minTier, freeOnlyMode)
+                },
                 fontSize = 12.sp,
-                color = Color(0xFF8A8A98)
+                color = if (allowed) Color(0xFF8A8A98) else Color(0xFFE57373)
             )
+        }
+        if (!allowed) {
+            Icon(
+                imageVector = Icons.Outlined.Lock,
+                contentDescription = "Locked",
+                tint = muted,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
         }
         Box(
             modifier = Modifier

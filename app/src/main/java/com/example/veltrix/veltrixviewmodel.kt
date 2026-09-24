@@ -78,8 +78,8 @@ class veltrixviewmodel : ViewModel(){
     var walletSnapshot by mutableStateOf(WalletSnapshot())
         private set
 
-    /** null = not loaded yet; use static catalog until set. */
-    var allowedOnlineModelIds by mutableStateOf<Set<String>?>(null)
+    /** Catalog model id -> server allowed (null = not loaded yet). */
+    var onlineModelAccess by mutableStateOf<Map<String, Boolean>?>(null)
         private set
 
     companion object {
@@ -121,12 +121,13 @@ class veltrixviewmodel : ViewModel(){
                     val models = fetchModelsJson(idToken)
                     Pair(wallet, models)
                 }.getOrNull()
-            }?.let { (wallet, modelIds) ->
+            }?.let { (wallet, access) ->
                 walletSnapshot = wallet
-                allowedOnlineModelIds = modelIds
-                if (OnlineMode && modelIds.isNotEmpty() && selectedModelId !in modelIds) {
-                    selectedModelId = modelIds.firstOrNull { it == AiModels.DEFAULT_ONLINE_ID }
-                        ?: modelIds.first()
+                onlineModelAccess = access
+                if (OnlineMode && access.isNotEmpty() && access[selectedModelId] != true) {
+                    selectedModelId = access.entries.firstOrNull { it.value && it.key == AiModels.DEFAULT_ONLINE_ID }?.key
+                        ?: access.entries.firstOrNull { it.value }?.key
+                        ?: AiModels.DEFAULT_ONLINE_ID
                 }
             }
         }
@@ -144,7 +145,7 @@ class veltrixviewmodel : ViewModel(){
         return WalletSnapshot.fromJson(org.json.JSONObject(body))
     }
 
-    private fun fetchModelsJson(idToken: String): Set<String> {
+    private fun fetchModelsJson(idToken: String): Map<String, Boolean> {
         val url = java.net.URL("$BACKEND_BASE/v1/models")
         val connection = url.openConnection() as java.net.HttpURLConnection
         connection.requestMethod = "GET"
@@ -154,13 +155,15 @@ class veltrixviewmodel : ViewModel(){
         }
         val body = connection.inputStream.bufferedReader().readText()
         val root = org.json.JSONObject(body)
-        val arr = root.optJSONArray("models") ?: return emptySet()
-        val ids = mutableSetOf<String>()
+        val arr = root.optJSONArray("models") ?: return emptyMap()
+        val access = mutableMapOf<String, Boolean>()
         for (i in 0 until arr.length()) {
-            val id = arr.optJSONObject(i)?.optString("id") ?: continue
-            if (id.isNotBlank()) ids.add(id)
+            val obj = arr.optJSONObject(i) ?: continue
+            val id = obj.optString("id")
+            if (id.isBlank()) continue
+            access[id] = obj.optBoolean("allowed", false)
         }
-        return ids
+        return access
     }
 
     private fun applyWalletFromChatJson(response: String) {
@@ -693,6 +696,7 @@ class veltrixviewmodel : ViewModel(){
                         200 -> {
                             val response = connection.inputStream.bufferedReader().readText()
                             applyWalletFromChatJson(response)
+                            refreshOnlineAccount()
                             org.json.JSONObject(response).getString("reply")
                         }
                         402, 403 -> {
