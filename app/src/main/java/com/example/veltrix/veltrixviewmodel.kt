@@ -3,6 +3,7 @@ package com.example.veltrix
 
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -11,14 +12,21 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.veltrix.chathistorry.COMPACTION_WINDOW
+import com.example.veltrix.chathistorry.CONTEXT_SUMMARY_MAX_WORDS
 import com.example.veltrix.chathistorry.ChatHistoryStore
 import com.example.veltrix.chathistorry.ChatSession
 import com.example.veltrix.chathistorry.ChatSessionSummary
+import com.example.veltrix.chathistorry.PROFILE_CHAT_BATCH
+import com.example.veltrix.chathistorry.PROFILE_SUMMARY_MAX_WORDS
 import com.example.veltrix.chathistorry.SUMMARY_INSTRUCTION
 import com.example.veltrix.chathistorry.TITLE_INSTRUCTION
 import com.example.veltrix.chathistorry.buildInitialTitlePrompt
 import com.example.veltrix.chathistorry.buildRefinedTitlePrompt
 import com.example.veltrix.chathistorry.buildSummaryPrompt
+import com.example.veltrix.chathistorry.clampWords
+import com.example.veltrix.chathistorry.compactionChunk
+import com.example.veltrix.chathistorry.conversationText
 import com.example.veltrix.chathistorry.countUserMessages
 import com.example.veltrix.chathistorry.firstUserMessage
 import com.example.veltrix.chathistorry.heuristicTitle
@@ -26,8 +34,12 @@ import com.example.veltrix.chathistorry.messagesUpToNthUser
 import com.example.veltrix.chathistorry.needsInitialTitle
 import com.example.veltrix.chathistorry.sanitizeSummary
 import com.example.veltrix.chathistorry.sanitizeTitle
+import com.example.veltrix.chathistorry.shouldCompact
+import com.example.veltrix.chathistorry.shouldRefreshProfile
 import com.example.veltrix.chathistorry.toSummary
+import com.example.veltrix.chathistorry.unsummarizedTail
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -60,8 +72,31 @@ class veltrixviewmodel : ViewModel(){
 
     var OnlineMode by mutableStateOf(true)
 
+    /** OpenRouter model id; server enforces tier allow-lists. */
+    var selectedModelId by mutableStateOf(AiModels.DEFAULT_ONLINE_ID)
+
+    var walletSnapshot by mutableStateOf(WalletSnapshot())
+        private set
+
+    /** null = not loaded yet; use static catalog until set. */
+    var allowedOnlineModelIds by mutableStateOf<Set<String>?>(null)
+        private set
+
+    companion object {
+        private const val BACKEND_BASE = "https://veltrix-backend-nmvy.onrender.com"
+        private const val TAG = "ChatHistorySync"
+    }
+
     var currentSessionId by mutableStateOf(UUID.randomUUID().toString())
         private set
+
+    private var sessionCreatedAt: Long = System.currentTimeMillis()
+    private var compactedSummary by mutableStateOf("")
+    private var summarizedUntilMessage by mutableStateOf(0)
+    private var messagesSinceSummary by mutableStateOf(0)
+    private var profileSummary by mutableStateOf("")
+    private var summarizedChatCount by mutableStateOf(0)
+    private var profileBatchInFlight = false
 
     val sessionSummaries = mutableStateListOf<ChatSessionSummary>()
 
@@ -72,6 +107,68 @@ class veltrixviewmodel : ViewModel(){
 
     private val _userProfile = MutableStateFlow<UserProfile?>(null)
     val userProfile: StateFlow<UserProfile?> = _userProfile.asStateFlow()
+
+    fun fetchWallet() {
+        refreshOnlineAccount()
+    }
+
+    fun refreshOnlineAccount() {
+        viewModelScope.launch {
+            val idToken = auth.currentUser?.getIdToken(false)?.await()?.token ?: return@launch
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val wallet = fetchWalletJson(idToken)
+                    val models = fetchModelsJson(idToken)
+                    Pair(wallet, models)
+                }.getOrNull()
+            }?.let { (wallet, modelIds) ->
+                walletSnapshot = wallet
+                allowedOnlineModelIds = modelIds
+                if (OnlineMode && modelIds.isNotEmpty() && selectedModelId !in modelIds) {
+                    selectedModelId = modelIds.firstOrNull { it == AiModels.DEFAULT_ONLINE_ID }
+                        ?: modelIds.first()
+                }
+            }
+        }
+    }
+
+    private fun fetchWalletJson(idToken: String): WalletSnapshot {
+        val url = java.net.URL("$BACKEND_BASE/v1/wallet")
+        val connection = url.openConnection() as java.net.HttpURLConnection
+        connection.requestMethod = "GET"
+        connection.setRequestProperty("Authorization", "Bearer $idToken")
+        if (connection.responseCode != 200) {
+            throw IllegalStateException("wallet ${connection.responseCode}")
+        }
+        val body = connection.inputStream.bufferedReader().readText()
+        return WalletSnapshot.fromJson(org.json.JSONObject(body))
+    }
+
+    private fun fetchModelsJson(idToken: String): Set<String> {
+        val url = java.net.URL("$BACKEND_BASE/v1/models")
+        val connection = url.openConnection() as java.net.HttpURLConnection
+        connection.requestMethod = "GET"
+        connection.setRequestProperty("Authorization", "Bearer $idToken")
+        if (connection.responseCode != 200) {
+            throw IllegalStateException("models ${connection.responseCode}")
+        }
+        val body = connection.inputStream.bufferedReader().readText()
+        val root = org.json.JSONObject(body)
+        val arr = root.optJSONArray("models") ?: return emptySet()
+        val ids = mutableSetOf<String>()
+        for (i in 0 until arr.length()) {
+            val id = arr.optJSONObject(i)?.optString("id") ?: continue
+            if (id.isNotBlank()) ids.add(id)
+        }
+        return ids
+    }
+
+    private fun applyWalletFromChatJson(response: String) {
+        runCatching {
+            val obj = org.json.JSONObject(response)
+            walletSnapshot = WalletSnapshot.fromJson(obj)
+        }
+    }
 
     fun String.escapeJson(): String = this
         .replace("\\", "\\\\")
@@ -109,8 +206,9 @@ class veltrixviewmodel : ViewModel(){
                     )
                 }
                 mergeSummaries(remote)
-            } catch (_: Exception) {
-                // Offline or Firestore unavailable — keep local list only
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to load chat list from Firestore", e)
+                historyStatusMessage = "Showing local chats only"
             }
         }
     }
@@ -118,11 +216,21 @@ class veltrixviewmodel : ViewModel(){
     fun startNewChat(context: Context) {
         val appContext = context.applicationContext
         historyAppContext = appContext
-        if (messagelist.isNotEmpty()) {
-            persistCurrentSession(appContext)
+        viewModelScope.launch {
+            if (messagelist.isNotEmpty()) {
+                finalizeAndPersistSession(appContext)
+            }
+            resetSessionState()
         }
+    }
+
+    private fun resetSessionState() {
         messagelist.clear()
         currentSessionId = UUID.randomUUID().toString()
+        sessionCreatedAt = System.currentTimeMillis()
+        compactedSummary = ""
+        summarizedUntilMessage = 0
+        messagesSinceSummary = 0
         historyStatusMessage = null
     }
 
@@ -137,7 +245,7 @@ class veltrixviewmodel : ViewModel(){
 
         viewModelScope.launch {
             if (messagelist.isNotEmpty()) {
-                persistCurrentSession(appContext)
+                finalizeAndPersistSession(appContext)
             }
 
             val localSession = withContext(Dispatchers.IO) {
@@ -183,38 +291,81 @@ class veltrixviewmodel : ViewModel(){
         historyAppContext = appContext
 
         viewModelScope.launch {
-            val messages = messagelist.toList()
-            val existing = withContext(Dispatchers.IO) {
-                ChatHistoryStore.findLocal(appContext, uid, currentSessionId)
-            }
-            val metadata = resolveSessionMetadata(existing, messages)
+            persistSessionSnapshot(appContext, uid, finalizeForProfile = false)
+        }
+    }
 
-            val session = ChatSession(
-                id = currentSessionId,
-                title = metadata.title,
-                summary = metadata.summary,
-                lastMessage = messages.lastOrNull()?.message.orEmpty(),
-                updatedAt = System.currentTimeMillis(),
-                titleRefined = metadata.titleRefined,
-                messages = messages
+    private suspend fun finalizeAndPersistSession(appContext: Context) {
+        val uid = auth.currentUser?.uid ?: return
+        if (messagelist.isEmpty()) return
+        persistSessionSnapshot(appContext, uid, finalizeForProfile = true)
+    }
+
+    private suspend fun persistSessionSnapshot(
+        appContext: Context,
+        uid: String,
+        finalizeForProfile: Boolean
+    ) {
+        val messages = messagelist.toList()
+        val existing = withContext(Dispatchers.IO) {
+            ChatHistoryStore.findLocal(appContext, uid, currentSessionId)
+        }
+        val metadata = resolveSessionMetadata(existing, messages)
+        if (finalizeForProfile && OnlineMode) {
+            maybeCompactContext()
+        }
+        var finalSummary = metadata.summary.ifBlank { compactedSummary }
+        if (finalizeForProfile && finalSummary.isBlank() && messages.isNotEmpty()) {
+            val raw = callGeminiMeta(
+                task = "compact",
+                prompt = conversationText(messages),
+                priorSummary = compactedSummary
             )
+            if (!raw.isNullOrBlank()) {
+                compactedSummary = clampWords(raw, CONTEXT_SUMMARY_MAX_WORDS)
+                summarizedUntilMessage = messages.size
+                messagesSinceSummary = 0
+                finalSummary = compactedSummary
+            } else {
+                finalSummary = clampWords(conversationText(messages.takeLast(20)), 40)
+            }
+        } else if (finalizeForProfile) {
+            finalSummary = finalSummary.ifBlank { compactedSummary }
+        }
 
-            withContext(Dispatchers.IO) {
-                ChatHistoryStore.upsertLocal(appContext, uid, session)
-                try {
-                    ChatHistoryStore.chatsCollection(uid)
-                        .document(session.id)
-                        .set(ChatHistoryStore.sessionToMap(session))
-                        .await()
-                } catch (_: Exception) {
-                    // Local cache still updated
-                }
-            }
-            upsertSummary(session.toSummary(cachedLocally = true))
-            val localIds = withContext(Dispatchers.IO) {
-                ChatHistoryStore.loadLocal(appContext, uid).map { it.id }.toSet()
-            }
-            applyLocalFlags(localIds)
+        val session = ChatSession(
+            id = currentSessionId,
+            title = metadata.title,
+            summary = finalSummary,
+            lastMessage = messages.lastOrNull()?.message.orEmpty(),
+            updatedAt = System.currentTimeMillis(),
+            titleRefined = metadata.titleRefined,
+            compactedSummary = compactedSummary.ifBlank { finalSummary },
+            summarizedUntilMessage = summarizedUntilMessage,
+            messagesSinceSummary = messagesSinceSummary,
+            createdAt = existing?.createdAt?.takeIf { it > 0 } ?: sessionCreatedAt,
+            messages = messages
+        )
+
+        val syncError = withContext(Dispatchers.IO) {
+            ChatHistoryStore.upsertLocal(appContext, uid, session)
+            ChatHistoryStore.syncSessionToFirestore(uid, session)
+        }
+        if (syncError != null) {
+            Log.e(TAG, "Firestore sync failed for session ${session.id}: $syncError")
+            historyStatusMessage = syncError
+            Toast.makeText(appContext, syncError, Toast.LENGTH_LONG).show()
+        } else {
+            historyStatusMessage = null
+        }
+        upsertSummary(session.toSummary(cachedLocally = true))
+        val localIds = withContext(Dispatchers.IO) {
+            ChatHistoryStore.loadLocal(appContext, uid).map { it.id }.toSet()
+        }
+        applyLocalFlags(localIds)
+
+        if (finalizeForProfile && session.compactedSummary.isNotBlank()) {
+            maybeUpdateProfileSummary(uid, session.compactedSummary)
         }
     }
 
@@ -269,36 +420,50 @@ class veltrixviewmodel : ViewModel(){
         prompt: String,
         fallback: String
     ): String {
-        val raw = generateMetaText(instruction, prompt) ?: return fallback
+        val raw = if (OnlineMode) {
+            callGeminiMeta(task = "title", prompt = "$instruction\n\n$prompt")
+        } else {
+            callOfflineMeta("$instruction\n\n$prompt")
+        } ?: return fallback
         val cleaned = sanitizeTitle(raw)
         return cleaned.ifBlank { fallback }
     }
 
     private suspend fun generateSummary(prompt: String): String {
-        val raw = generateMetaText(SUMMARY_INSTRUCTION, prompt) ?: return ""
+        val raw = if (OnlineMode) {
+            callGeminiMeta(
+                task = "compact",
+                prompt = prompt,
+                priorSummary = ""
+            )
+        } else {
+            callOfflineMeta("$SUMMARY_INSTRUCTION\n\n$prompt")
+        } ?: return ""
         return sanitizeSummary(raw)
     }
 
-    private suspend fun generateMetaText(instruction: String, prompt: String): String? {
-        if (OnlineMode) {
-            callOnlineMeta(instruction, prompt)?.let { return it }
-        }
-        return callOfflineMeta("$instruction\n\n$prompt")
-    }
-
-    private suspend fun callOnlineMeta(instruction: String, prompt: String): String? {
+    private suspend fun callGeminiMeta(
+        task: String,
+        prompt: String,
+        priorSummary: String? = null
+    ): String? {
         return try {
             val idToken = auth.currentUser?.getIdToken(false)?.await()?.token ?: return null
             withContext(Dispatchers.IO) {
+                val priorJson = if (priorSummary.isNullOrBlank()) {
+                    "null"
+                } else {
+                    "\"${priorSummary.escapeJson()}\""
+                }
                 val requestBody = """
                     {
-                    "message": "${prompt.escapeJson()}",
-                    "history": [],
-                    "instruction": "${instruction.escapeJson()}"
+                    "task": "${task.escapeJson()}",
+                    "prompt": "${prompt.escapeJson()}",
+                    "prior_summary": $priorJson
                     }
                     """.trimIndent()
 
-                val url = java.net.URL("https://veltrix-backend-nmvy.onrender.com/chat")
+                val url = java.net.URL("https://veltrix-backend-nmvy.onrender.com/v1/meta")
                 val connection = url.openConnection() as java.net.HttpURLConnection
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("Content-Type", "application/json")
@@ -309,13 +474,92 @@ class veltrixviewmodel : ViewModel(){
                 when (connection.responseCode) {
                     200 -> {
                         val response = connection.inputStream.bufferedReader().readText()
-                        org.json.JSONObject(response).getString("reply").trim()
+                        org.json.JSONObject(response).getString("text").trim()
                     }
                     else -> null
                 }
             }
         } catch (_: Exception) {
             null
+        }
+    }
+
+    private suspend fun maybeCompactContext() {
+        if (!OnlineMode) return
+        if (!shouldCompact(messagesSinceSummary)) return
+        val messages = messagelist.toList()
+        val chunk = compactionChunk(messages, summarizedUntilMessage)
+        if (chunk.size < COMPACTION_WINDOW) return
+
+        val chunkText = conversationText(chunk)
+        val updated = callGeminiMeta(
+            task = "compact",
+            prompt = chunkText,
+            priorSummary = compactedSummary
+        ) ?: return
+
+        compactedSummary = clampWords(updated, CONTEXT_SUMMARY_MAX_WORDS)
+        summarizedUntilMessage += chunk.size
+        messagesSinceSummary = (messages.size - summarizedUntilMessage).coerceAtLeast(0)
+    }
+
+    private suspend fun maybeUpdateProfileSummary(uid: String, chatSummary: String) {
+        if (profileBatchInFlight || chatSummary.isBlank()) return
+        val nextCount = summarizedChatCount + 1
+        summarizedChatCount = nextCount
+
+        val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+        try {
+            db.collection("users").document(uid).update(
+                mapOf(
+                    "summarizedChatCount" to nextCount,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        } catch (_: Exception) {
+            // still try local profile refresh below if batch ready
+        }
+
+        if (!shouldRefreshProfile(nextCount)) {
+            _userProfile.value = _userProfile.value?.copy(summarizedChatCount = nextCount)
+            return
+        }
+
+        profileBatchInFlight = true
+        try {
+            val recent = (
+                listOf(chatSummary) + sessionSummaries
+                    .sortedByDescending { it.updatedAt }
+                    .mapNotNull { s ->
+                        s.compactedSummary.ifBlank { s.summary }.takeIf { it.isNotBlank() }
+                    }
+                )
+                .distinct()
+                .take(PROFILE_CHAT_BATCH)
+            if (recent.isEmpty()) return
+
+            val merged = callGeminiMeta(
+                task = "profile",
+                prompt = recent.joinToString("\n---\n")
+            ) ?: return
+            val profile = clampWords(merged, PROFILE_SUMMARY_MAX_WORDS)
+            profileSummary = profile
+            try {
+                db.collection("users").document(uid).update(
+                    mapOf(
+                        "profileSummary" to profile,
+                        "summarizedChatCount" to nextCount,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            } catch (_: Exception) {
+            }
+            _userProfile.value = _userProfile.value?.copy(
+                profileSummary = profile,
+                summarizedChatCount = nextCount
+            )
+        } finally {
+            profileBatchInFlight = false
         }
     }
 
@@ -332,8 +576,12 @@ class veltrixviewmodel : ViewModel(){
 
     private fun applySession(session: ChatSession) {
         currentSessionId = session.id
+        sessionCreatedAt = session.createdAt.takeIf { it > 0 } ?: session.updatedAt
+        compactedSummary = session.compactedSummary
+        summarizedUntilMessage = session.summarizedUntilMessage.coerceIn(0, session.messages.size)
         messagelist.clear()
         messagelist.addAll(session.messages)
+        messagesSinceSummary = (session.messages.size - summarizedUntilMessage).coerceAtLeast(0)
         historyStatusMessage = null
         upsertSummary(session.toSummary(cachedLocally = true))
     }
@@ -347,6 +595,7 @@ class veltrixviewmodel : ViewModel(){
                 cachedLocally = prev.cachedLocally || next.cachedLocally,
                 title = if (next.updatedAt >= prev.updatedAt) next.title else prev.title,
                 summary = if (next.updatedAt >= prev.updatedAt) next.summary else prev.summary,
+                compactedSummary = if (next.updatedAt >= prev.updatedAt) next.compactedSummary else prev.compactedSummary,
                 lastMessage = if (next.updatedAt >= prev.updatedAt) next.lastMessage else prev.lastMessage,
                 updatedAt = maxOf(prev.updatedAt, next.updatedAt)
             )
@@ -372,6 +621,12 @@ class veltrixviewmodel : ViewModel(){
         messagelist.clear()
         sessionSummaries.clear()
         currentSessionId = UUID.randomUUID().toString()
+        sessionCreatedAt = System.currentTimeMillis()
+        compactedSummary = ""
+        summarizedUntilMessage = 0
+        messagesSinceSummary = 0
+        profileSummary = ""
+        summarizedChatCount = 0
         chatHistoryInitialized = false
         historyStatusMessage = null
         historyAppContext = null
@@ -395,25 +650,38 @@ class veltrixviewmodel : ViewModel(){
                     ?: throw Exception("Not logged in")
 
                 val reply = withContext(Dispatchers.IO) {
-
-                    val history = messagelist
-                        .dropLast(1)
-                        .takeLast(10)
+                    val prior = messagelist.dropLast(1)
+                    val tail = unsummarizedTail(prior, summarizedUntilMessage)
+                    val history = tail
                         .map {
                             val role = if (it.Role == "User") "user" else "model"
                             """{"role":"$role","content":"${it.message.escapeJson()}"}"""
                         }
                         .joinToString(",")
 
+                    val profileJson = if (profileSummary.isBlank()) {
+                        "null"
+                    } else {
+                        "\"${profileSummary.escapeJson()}\""
+                    }
+                    val compactedJson = if (compactedSummary.isBlank()) {
+                        "null"
+                    } else {
+                        "\"${compactedSummary.escapeJson()}\""
+                    }
+
                     val requestBody = """
                         {
                         "message": "${question.escapeJson()}",
                         "history": [$history],
-                        "instruction": "${instruction.escapeJson()}"
+                        "instruction": "${instruction.escapeJson()}",
+                        "model": "${selectedModelId.escapeJson()}",
+                        "profile_summary": $profileJson,
+                        "compacted_summary": $compactedJson
                         }
                         """.trimIndent()
 
-                    val url = java.net.URL("https://veltrix-backend-nmvy.onrender.com/chat")
+                    val url = java.net.URL("$BACKEND_BASE/chat")
                     val connection = url.openConnection() as java.net.HttpURLConnection
                     connection.requestMethod = "POST"
                     connection.setRequestProperty("Content-Type", "application/json")
@@ -424,7 +692,16 @@ class veltrixviewmodel : ViewModel(){
                     when (connection.responseCode) {
                         200 -> {
                             val response = connection.inputStream.bufferedReader().readText()
+                            applyWalletFromChatJson(response)
                             org.json.JSONObject(response).getString("reply")
+                        }
+                        402, 403 -> {
+                            val error = connection.errorStream?.bufferedReader()?.readText()
+                            val detail = error?.let {
+                                runCatching { org.json.JSONObject(it).optString("detail") }.getOrNull()
+                            }
+                            detail?.takeIf { it.isNotBlank() }
+                                ?: "Allowance exhausted or model not on your plan. Upgrade to continue."
                         }
                         429 -> LIMIT_EXHAUSTED_MESSAGE
                         else -> {
@@ -435,6 +712,9 @@ class veltrixviewmodel : ViewModel(){
                 }
 
                 messagelist.add(Response(reply, "Model"))
+                messagesSinceSummary =
+                    (messagelist.size - summarizedUntilMessage).coerceAtLeast(0)
+                maybeCompactContext()
                 historyAppContext?.let { persistCurrentSession(it) }
 
             } catch (e: Exception) {
@@ -525,13 +805,16 @@ class veltrixviewmodel : ViewModel(){
     }
 
     fun signout() {
-        historyAppContext?.let { ctx ->
-            if (messagelist.isNotEmpty()) persistCurrentSession(ctx)
+        val ctx = historyAppContext
+        viewModelScope.launch {
+            if (ctx != null && messagelist.isNotEmpty()) {
+                finalizeAndPersistSession(ctx)
+            }
+            auth.signOut()
+            clearChatHistoryState()
+            _userProfile.value = null
+            _authstate.value = Authstate.Unauthenticated
         }
-        auth.signOut()
-        clearChatHistoryState()
-        _userProfile.value = null
-        _authstate.value = Authstate.Unauthenticated
     }
     fun resetState() {
         _authstate.value = Authstate.Unauthenticated
@@ -569,6 +852,9 @@ class veltrixviewmodel : ViewModel(){
             if (document.exists()) {
                 val profile = document.toObject(UserProfile::class.java)
                 _userProfile.value = profile
+                profileSummary = profile?.profileSummary.orEmpty()
+                summarizedChatCount = profile?.summarizedChatCount ?: 0
+                fetchWallet()
                 _authstate.value = if (profile?.onboardcomplete == true)
                     Authstate.Authenticated else Authstate.ProfileIncomplete
             } else {
@@ -576,6 +862,8 @@ class veltrixviewmodel : ViewModel(){
                 userRef.set(newProfile)
                     .addOnSuccessListener {
                         _userProfile.value = newProfile
+                        profileSummary = ""
+                        summarizedChatCount = 0
                         _authstate.value = Authstate.ProfileIncomplete
                     }
                     .addOnFailureListener {
@@ -794,5 +1082,7 @@ data class UserProfile(
     val callsUsed: Int = 0,
     val callsLimit: Int = 15,
     val onboardcomplete : Boolean = false,
-    val selectedplan : String = ""
+    val selectedplan : String = "",
+    val profileSummary: String = "",
+    val summarizedChatCount: Int = 0
 )
