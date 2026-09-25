@@ -1,75 +1,61 @@
-Veltrix 🤖
-Veltrix is an AI-powered Android chat assistant that works online and offline — using Gemini API when connected and switching to an on-device ML model automatically when not.
-Three specialized modes — Brainstorming, Learning, and Coding — deliver expert-level responses without complex prompts.
+Veltrix is an AI-powered Android chat assistant that works online and offline — using OpenRouter (multi-model) via a secure FastAPI backend when connected, and switching to an on-device ML model when not.
 
-✨ Features
+## Features
 
-🌐 Online Mode — Powered by Gemini API for high-quality AI responses
-📴 Offline Mode — Automatically switches to an on-device ML model with zero internet dependency
-🔐 Firebase Authentication — Secure user login and session management
-🧠 Brainstorming Mode — Generates creative ideas and explores concepts
-📚 Learning Mode — Explains topics clearly, like a personal tutor
-💻 Coding Mode — Helps debug, write, and review code like an expert developer
-⚡ Reactive UI — Built with Jetpack Compose and StateFlow for smooth, real-time state management
+- Online Mode — OpenRouter multi-model chat (GPT, Claude, Gemini, Kimi, MiniMax, and more) with server-side cost metering
+- Offline Mode — On-device ML model with zero internet dependency
+- Firebase Authentication — Secure user login and session management
+- Brainstorming / Learning / Coding modes
+- Jetpack Compose + StateFlow UI
 
+## Tech stack
 
-🛠️ Tech Stack
-LayerTechnologyLanguageKotlinUIJetpack ComposeArchitectureMVVM + StateFlowAuthenticationFirebase AuthOnline AIGemini APIOffline AIOn-Device ML ModelBackend (upcoming)FastAPI
+| Layer | Technology |
+|---|---|
+| Language | Kotlin |
+| UI | Jetpack Compose |
+| Architecture | MVVM + StateFlow |
+| Auth | Firebase Auth |
+| Online AI | OpenRouter via FastAPI backend |
+| Offline AI | On-device ML (MediaPipe) |
+| Backend | FastAPI + Firestore |
 
-🚀 Getting Started
-Prerequisites
+## Getting started
 
-Android Studio Hedgehog or newer
-Android device / emulator running API 26+
-A Firebase project
-A Gemini API key
+### Prerequisites
 
-Setup
+- Android Studio Hedgehog or newer
+- Device / emulator API 30+
+- Firebase project
+- OpenRouter API key stored on the **backend** (Render), not in the Android app
 
-Clone the repo
+### Android
 
-bash   git clone https://github.com/saksham-kochhar/Veltrix.git
-   cd Veltrix
+1. Clone the repo
+2. Add `google-services.json` to `/app`
+3. Open in Android Studio and Run
 
-Add Firebase config
-Download your google-services.json from Firebase Console and place it in the /app directory.
-Add API keys
-Create a local.properties file in the root directory and add:
+### Backend
 
-   GEMINI_API_KEY=your_gemini_api_key_here
+See [Backend/veltrix-backend-main/veltrix-backend-main/README.md](Backend/veltrix-backend-main/veltrix-backend-main/README.md).
 
-Run the app
-Open the project in Android Studio and click Run.
+On Render, set at least:
 
+- `OPENROUTER_API_KEY`
+- `FIREBASE_SERVICE_ACCOUNT` (or `serviceAccount.json` for local)
 
-📁 Project Structure
-app/
-├── data/          # Repositories and data sources
-├── domain/        # Use cases and models
-├── ui/            # Jetpack Compose screens and components
-├── viewmodel/     # MVVM ViewModels with StateFlow
-└── utils/         # Helper classes and extensions
+## Environment
 
-🔑 Environment Variables
-This project uses the following sensitive files that are not committed to the repo:
-FilePurposegoogle-services.jsonFirebase configurationlocal.propertiesAPI keys
+| File / var | Purpose |
+|---|---|
+| `google-services.json` | Firebase config (Android) |
+| `OPENROUTER_API_KEY` | OpenRouter key on Render only |
+| `FIREBASE_SERVICE_ACCOUNT` | Backend Firebase Admin credentials |
 
-🗺️ Roadmap
+## Author
 
- Online AI via Gemini API
- Offline on-device ML fallback
- Firebase Authentication
- Specialized chat modes
- FastAPI backend for secure key management
- Play Store release
-
-
-👤 Author
 Saksham Kochhar
 
-GitHub: @saksham-kochhar
-LinkedIn: linkedin.com/in/saksham-kochhar
+## License
 
-
-📄 License
-This project is open source and available under the MIT License.
+MIT

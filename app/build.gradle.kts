@@ -49,6 +49,9 @@ dependencies {
     //weight(foundation)
     implementation("androidx.compose.foundation:foundation:1.11.2")
 
+    // Markdown rendering for assistant chat bubbles
+    implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.37.0")
+
     //Bom Firebase
     implementation(platform("com.google.firebase:firebase-bom:34.14.0"))
     //Gemini Api

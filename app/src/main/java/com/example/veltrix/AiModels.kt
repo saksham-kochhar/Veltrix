@@ -66,18 +66,60 @@ object AiModels {
             tint = Color(0xFF76B900),
             "nvidia/nemotron-3-ultra-550b-a55b:free" to "Nemotron 3 Ultra 550B" to "free",
             "nvidia/nemotron-3-super-120b-a12b:free" to "Nemotron 3 Super 120B" to "free",
-            "nvidia/nemotron-3-nano-30b-a3b:free" to "Nemotron Nano 30B" to "free",
-            "nvidia/nemotron-nano-12b-2-vl:free" to "Nemotron Nano 12B VL" to "free",
-            "nvidia/nemotron-nano-9b-v2:free" to "Nemotron Nano 9B" to "free"
+            "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" to "Nemotron 3 Nano Omni 30B" to "free"
+        ),
+        provider(
+            id = "inclusionai",
+            displayName = "Inclusion AI",
+            icon = Icons.Outlined.AutoAwesome,
+            tint = Color(0xFF3949AB),
+            "inclusionai/ling-3.0-flash-fin:free" to "Ling 3.0 Flash Fin" to "free",
+            "inclusionai/ling-3.0-flash-sante:free" to "Ling 3.0 Flash Santé" to "free"
+        ),
+        provider(
+            id = "poolside",
+            displayName = "Poolside",
+            icon = Icons.Outlined.Hub,
+            tint = Color(0xFF00695C),
+            "poolside/laguna-s-2.1:free" to "Laguna S 2.1" to "free",
+            "poolside/laguna-xs-2.1:free" to "Laguna XS 2.1" to "free"
+        ),
+        provider(
+            id = "dots",
+            displayName = "Dots",
+            icon = Icons.Outlined.Bolt,
+            tint = Color(0xFF5C6BC0),
+            "dots-studio/dots-3-note-preview:free" to "Dots 3 Note Preview" to "free"
+        ),
+        provider(
+            id = "nexagi",
+            displayName = "Nex AGI",
+            icon = Icons.Outlined.Psychology,
+            tint = Color(0xFF00897B),
+            "nex-agi/nex-n2.5-pro:free" to "Nex N2.5 Pro" to "free",
+            "nex-agi/nex-n2.5-mini:free" to "Nex N2.5 Mini" to "free"
+        ),
+        provider(
+            id = "thinkingmachines",
+            displayName = "Thinking Machines",
+            icon = Icons.Outlined.Science,
+            tint = Color(0xFF6D4C41),
+            "thinkingmachines/inkling:free" to "Inkling" to "free",
+            "thinkingmachines/inkling-small:free" to "Inkling Small" to "free"
+        ),
+        provider(
+            id = "cohere",
+            displayName = "Cohere",
+            icon = Icons.Outlined.Hub,
+            tint = Color(0xFF2E7D32),
+            "cohere/north-mini-code:free" to "North Mini Code" to "free"
         ),
         provider(
             id = "qwen",
             displayName = "Qwen",
             icon = Icons.Outlined.SmartToy,
             tint = Color(0xFF607D8B),
-            "qwen/qwen3-coder:free" to "Qwen3 Coder 480B" to "free",
-            "qwen/qwen3-next-80b-a3b:free" to "Qwen3 Next 80B" to "free",
-            "qwen/qwen3-4b:free" to "Qwen3 4B" to "free"
+            "qwen/qwen3.8-27b:free" to "Qwen3.8 27B" to "free"
         ),
         provider(
             id = "google",
@@ -96,63 +138,24 @@ object AiModels {
             displayName = "OpenAI",
             icon = Icons.Outlined.Psychology,
             tint = Color(0xFF009688),
-            "openai/gpt-oss-120b:free" to "gpt-oss 120B" to "free",
-            "openai/gpt-oss-20b:free" to "gpt-oss 20B" to "free",
             "openai/gpt-5.4-nano" to "GPT-5.4 Nano" to "pro",
             "openai/gpt-5.6-luna" to "GPT-5.6 Luna" to "pro_plus",
             "openai/gpt-5.6-terra" to "GPT-5.6 Terra" to "ultra",
             "openai/gpt-5.6-sol" to "GPT-5.6 Sol" to "ultra"
         ),
         provider(
-            id = "meta",
-            displayName = "Meta",
-            icon = Icons.Outlined.Hub,
-            tint = Color(0xFF1877F2),
-            "meta-llama/llama-3.3-70b-instruct:free" to "Llama 3.3 70B" to "free",
-            "meta-llama/llama-3.2-3b-instruct:free" to "Llama 3.2 3B" to "free",
-            "meta-llama/llama-3.1-405b-instruct:free" to "Llama 3.1 405B" to "free"
-        ),
-        provider(
-            id = "nous",
-            displayName = "Nous",
-            icon = Icons.Outlined.Science,
-            tint = Color(0xFF8E24AA),
-            "nousresearch/hermes-3-llama-3.1-405b:free" to "Hermes 3 405B" to "free"
-        ),
-        provider(
             id = "zai",
             displayName = "Z.ai",
             icon = Icons.Outlined.Bolt,
             tint = Color(0xFF455A64),
-            "z-ai/glm-4.5-air:free" to "GLM 4.5 Air" to "free"
-        ),
-        provider(
-            id = "poolside",
-            displayName = "Poolside",
-            icon = Icons.Outlined.Hub,
-            tint = Color(0xFF00695C),
-            "poolside/laguna-xs.2:free" to "Laguna XS" to "free"
-        ),
-        provider(
-            id = "allenai",
-            displayName = "AllenAI",
-            icon = Icons.Outlined.Science,
-            tint = Color(0xFF5D4037),
-            "allenai/molmo2-8b:free" to "Molmo2 8B" to "free"
+            "z-ai/glm-5.2:free" to "GLM 5.2" to "free"
         ),
         provider(
             id = "liquid",
             displayName = "LiquidAI",
             icon = Icons.Outlined.Memory,
             tint = Color(0xFF00ACC1),
-            "liquid/lfm2.5-1.2b-instruct:free" to "LFM2.5 1.2B" to "free"
-        ),
-        provider(
-            id = "tngtech",
-            displayName = "TNG",
-            icon = Icons.Outlined.AutoAwesome,
-            tint = Color(0xFF6A1B9A),
-            "tngtech/r1t-chimera:free" to "R1T Chimera" to "free"
+            "liquid/lfm-2.5-2.6b:free" to "LFM 2.5 2.6B" to "free"
         ),
         provider(
             id = "deepseek",

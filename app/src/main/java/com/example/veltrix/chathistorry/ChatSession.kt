@@ -9,6 +9,10 @@ data class ChatSession(
     val lastMessage: String = "",
     val updatedAt: Long = 0L,
     val titleRefined: Boolean = false,
+    val compactedSummary: String = "",
+    val summarizedUntilMessage: Int = 0,
+    val messagesSinceSummary: Int = 0,
+    val createdAt: Long = 0L,
     val messages: List<Response> = emptyList()
 )
 
@@ -19,14 +23,16 @@ data class ChatSessionSummary(
     val summary: String = "",
     val lastMessage: String = "",
     val updatedAt: Long = 0L,
-    val cachedLocally: Boolean = false
+    val cachedLocally: Boolean = false,
+    val compactedSummary: String = ""
 )
 
 fun ChatSession.toSummary(cachedLocally: Boolean = true) = ChatSessionSummary(
     id = id,
     title = title,
-    summary = summary,
+    summary = summary.ifBlank { compactedSummary },
     lastMessage = lastMessage,
     updatedAt = updatedAt,
-    cachedLocally = cachedLocally
+    cachedLocally = cachedLocally,
+    compactedSummary = compactedSummary
 )

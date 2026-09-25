@@ -95,7 +95,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -1418,20 +1417,22 @@ fun MessageList(
                             )
                             .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
-                        Text(
-                            text = if (isUser) {
-                                AnnotatedString(displayText)
-                            } else {
-                                parseChatMarkdown(
-                                    raw = displayText,
-                                    textColor = textColor,
-                                    codeBackgroundHint = Color(0xFFE0E0EA)
-                                )
-                            },
-                            color = textColor,
-                            style = bubbleTextStyle,
-                            softWrap = true
-                        )
+                        if (isUser) {
+                            Text(
+                                text = displayText,
+                                color = textColor,
+                                style = bubbleTextStyle,
+                                softWrap = true
+                            )
+                        } else {
+                            AssistantMarkdownContent(
+                                markdown = displayText,
+                                textColor = textColor,
+                                linkColor = Color(0xFF5B4DFF),
+                                baseStyle = bubbleTextStyle,
+                                codeBackgroundHint = Color(0xFFE0E0EA)
+                            )
+                        }
                     }
                 }
 

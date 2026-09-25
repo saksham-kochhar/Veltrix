@@ -38,6 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -51,12 +52,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import com.example.veltrix.Navigation.Routes
+import com.example.veltrix.WalletSnapshot
 import com.example.veltrix.veltrixviewmodel
 
 @Composable
 fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel) {
     val profile by viewmodel.userProfile.collectAsState()
     val plan = profile?.plan?.lowercase() ?: "free"
+    val wallet = viewmodel.walletSnapshot
+
+    LaunchedEffect(Unit) {
+        viewmodel.fetchWallet()
+    }
     val fullName = "${profile?.firstname.orEmpty()} ${profile?.lastname.orEmpty()}".trim()
 
     val menuItems = listOf(
@@ -206,7 +213,9 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel)
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    PlanStatusBanner(plan = plan)
+                    PlanStatusBanner(plan = plan, freeOnlyMode = wallet.freeOnlyMode)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    CreditsAllowanceCard(wallet = wallet)
                 }
             }
 
@@ -294,13 +303,73 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel)
 }
 
 @Composable
-private fun PlanStatusBanner(plan: String) {
+private fun CreditsAllowanceCard(wallet: WalletSnapshot) {
+    val progress = if (wallet.creditsLimit > 0) {
+        (wallet.creditsUsed.toFloat() / wallet.creditsLimit).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "AI credits this period",
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 14.sp,
+            color = Color(0xFF333355)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color(0xFFE8E8F0))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(progress)
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF5B4DFF))
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "${wallet.creditsUsed} / ${wallet.creditsLimit} credits",
+            fontSize = 13.sp,
+            color = Color(0xFF555577)
+        )
+        Text(
+            text = "Today: ${wallet.creditsUsedToday} / ${wallet.creditsLimitDay} · 12h: ${wallet.creditsUsed12h} / ${wallet.creditsLimit12h}",
+            fontSize = 12.sp,
+            color = Color.Gray
+        )
+        if (wallet.freeOnlyMode) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Monthly credits used — free models only until reset.",
+                fontSize = 12.sp,
+                color = Color(0xFFB45309)
+            )
+        }
+    }
+}
+
+@Composable
+private fun PlanStatusBanner(plan: String, freeOnlyMode: Boolean = false) {
     val (bannerBg, accentColor, title, subtitle, icon) = when (plan) {
         "pro" -> PlanBannerStyle(
             bannerBg = Color(0xFFE9FFF0),
             accentColor = Color(0xFF00A651),
             title = "You're on Pro",
-            subtitle = "Enjoy all Pro features",
+            subtitle = if (freeOnlyMode) "Free models only until credits reset" else "Enjoy all Pro features",
+            icon = Icons.Default.WorkspacePremium
+        )
+
+        "pro_plus" -> PlanBannerStyle(
+            bannerBg = Color(0xFFE8F4FF),
+            accentColor = Color(0xFF2563EB),
+            title = "You're on Pro Plus",
+            subtitle = if (freeOnlyMode) "Free models only until credits reset" else "Premium models included",
             icon = Icons.Default.WorkspacePremium
         )
 
@@ -308,7 +377,7 @@ private fun PlanStatusBanner(plan: String) {
             bannerBg = Color(0xFFEAF8EE),
             accentColor = Color(0xFF16A34A),
             title = "You're on Ultra",
-            subtitle = "Enjoy all Premium features",
+            subtitle = if (freeOnlyMode) "Free models only until credits reset" else "Enjoy all Premium features",
             icon = Icons.Default.Diamond
         )
 

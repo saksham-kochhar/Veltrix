@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -65,7 +66,8 @@ fun ChatHistoryDrawerContent(
     statusMessage: String?,
     onNewChat: () -> Unit,
     onOpenSession: (String) -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    onOpenAccount: () -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
     val filteredSessions = remember(sessions, searchQuery) {
@@ -211,6 +213,7 @@ fun ChatHistoryDrawerContent(
                     color = HistoryMuted,
                     modifier = Modifier.padding(vertical = 24.dp)
                 )
+                Spacer(modifier = Modifier.weight(1f))
             } else {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -223,6 +226,48 @@ fun ChatHistoryDrawerContent(
                             onClick = { onOpenSession(session.id) }
                         )
                     }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(color = Color(0xFFF0F0F5))
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable(onClick = onOpenAccount)
+                    .padding(horizontal = 8.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(HistoryNewChatBg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Person,
+                        contentDescription = null,
+                        tint = HistoryPurple,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(
+                        text = "Account",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = HistoryNavy
+                    )
+                    Text(
+                        text = "Profile and settings",
+                        fontSize = 12.sp,
+                        color = HistoryMuted
+                    )
                 }
             }
         }

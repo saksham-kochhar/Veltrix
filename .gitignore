@@ -13,3 +13,11 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Cursor IDE (rules, local extracts, etc.)
+.cursor/
+
+# Local backend copy and graphify knowledge graph output
+Backend/
+backend/
+graphify-out/

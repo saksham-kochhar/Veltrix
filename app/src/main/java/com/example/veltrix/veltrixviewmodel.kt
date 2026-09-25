@@ -173,6 +173,13 @@ class veltrixviewmodel : ViewModel(){
         }
     }
 
+    private fun chatErrorDetail(connection: java.net.HttpURLConnection): String? {
+        val error = connection.errorStream?.bufferedReader()?.readText()
+        return error?.let {
+            runCatching { org.json.JSONObject(it).optString("detail") }.getOrNull()
+        }?.takeIf { it.isNotBlank() }
+    }
+
     fun String.escapeJson(): String = this
         .replace("\\", "\\\\")
         .replace("\"", "\\\"")
@@ -700,14 +707,13 @@ class veltrixviewmodel : ViewModel(){
                             org.json.JSONObject(response).getString("reply")
                         }
                         402, 403 -> {
-                            val error = connection.errorStream?.bufferedReader()?.readText()
-                            val detail = error?.let {
-                                runCatching { org.json.JSONObject(it).optString("detail") }.getOrNull()
-                            }
-                            detail?.takeIf { it.isNotBlank() }
+                            chatErrorDetail(connection)
                                 ?: "Allowance exhausted or model not on your plan. Upgrade to continue."
                         }
-                        429 -> LIMIT_EXHAUSTED_MESSAGE
+                        429 -> {
+                            chatErrorDetail(connection)
+                                ?: "Rate or daily limit reached. Try again later or use the offline model."
+                        }
                         else -> {
                             val error = connection.errorStream?.bufferedReader()?.readText()
                             "Error ${connection.responseCode}: $error"
@@ -1083,8 +1089,6 @@ data class UserProfile(
     val firstname: String = "",
     val lastname : String = "",
     val plan: String = "",
-    val callsUsed: Int = 0,
-    val callsLimit: Int = 15,
     val onboardcomplete : Boolean = false,
     val selectedplan : String = "",
     val profileSummary: String = "",

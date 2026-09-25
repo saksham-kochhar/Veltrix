@@ -3,6 +3,8 @@ package com.example.veltrix.chathistorry
 import android.content.Context
 import com.example.veltrix.Response
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
+import kotlinx.coroutines.tasks.await
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -16,6 +18,27 @@ object ChatHistoryStore {
             .collection("users")
             .document(uid)
             .collection("chats")
+
+    /** @return null on success, or a short user-facing error message. */
+    suspend fun syncSessionToFirestore(uid: String, session: ChatSession): String? {
+        return try {
+            chatsCollection(uid)
+                .document(session.id)
+                .set(sessionToMap(session))
+                .await()
+            null
+        } catch (e: FirebaseFirestoreException) {
+            when (e.code) {
+                FirebaseFirestoreException.Code.PERMISSION_DENIED ->
+                    "Chat couldn't sync — update Firestore rules for users/{uid}/chats"
+                FirebaseFirestoreException.Code.UNAVAILABLE ->
+                    "Chat saved offline — will sync when you're back online"
+                else -> "Chat sync failed: ${e.code}"
+            }
+        } catch (e: Exception) {
+            "Chat sync failed: ${e.message ?: "unknown error"}"
+        }
+    }
 
     private fun fileFor(context: Context, uid: String): File =
         File(context.filesDir, "chat_history_$uid.json")
@@ -57,7 +80,11 @@ object ChatHistoryStore {
         "summary" to session.summary,
         "lastMessage" to session.lastMessage,
         "updatedAt" to session.updatedAt,
+        "createdAt" to session.createdAt,
         "titleRefined" to session.titleRefined,
+        "compactedSummary" to session.compactedSummary,
+        "summarizedUntilMessage" to session.summarizedUntilMessage,
+        "messagesSinceSummary" to session.messagesSinceSummary,
         "messages" to session.messages.map { mapOf("message" to it.message, "Role" to it.Role) }
     )
 
@@ -70,26 +97,35 @@ object ChatHistoryStore {
                 Role = map["Role"]?.toString() ?: "Model"
             )
         }
+        val updatedAt = (data["updatedAt"] as? Number)?.toLong() ?: 0L
         return ChatSession(
             id = data["id"]?.toString() ?: "",
             title = data["title"]?.toString() ?: "New chat",
             summary = data["summary"]?.toString() ?: "",
             lastMessage = data["lastMessage"]?.toString() ?: "",
-            updatedAt = (data["updatedAt"] as? Number)?.toLong() ?: 0L,
+            updatedAt = updatedAt,
             titleRefined = data["titleRefined"] as? Boolean ?: false,
+            compactedSummary = data["compactedSummary"]?.toString() ?: "",
+            summarizedUntilMessage = (data["summarizedUntilMessage"] as? Number)?.toInt() ?: 0,
+            messagesSinceSummary = (data["messagesSinceSummary"] as? Number)?.toInt() ?: 0,
+            createdAt = (data["createdAt"] as? Number)?.toLong() ?: updatedAt,
             messages = messages
         )
     }
 
-    fun summaryFromMap(data: Map<String, Any?>, cachedLocally: Boolean): ChatSessionSummary =
-        ChatSessionSummary(
+    fun summaryFromMap(data: Map<String, Any?>, cachedLocally: Boolean): ChatSessionSummary {
+        val compacted = data["compactedSummary"]?.toString().orEmpty()
+        val summary = data["summary"]?.toString().orEmpty()
+        return ChatSessionSummary(
             id = data["id"]?.toString() ?: "",
             title = data["title"]?.toString() ?: "New chat",
-            summary = data["summary"]?.toString() ?: "",
+            summary = summary.ifBlank { compacted },
             lastMessage = data["lastMessage"]?.toString() ?: "",
             updatedAt = (data["updatedAt"] as? Number)?.toLong() ?: 0L,
-            cachedLocally = cachedLocally
+            cachedLocally = cachedLocally,
+            compactedSummary = compacted
         )
+    }
 
     private fun sessionToJson(session: ChatSession): JSONObject {
         val messages = JSONArray()
@@ -106,7 +142,11 @@ object ChatHistoryStore {
             .put("summary", session.summary)
             .put("lastMessage", session.lastMessage)
             .put("updatedAt", session.updatedAt)
+            .put("createdAt", session.createdAt)
             .put("titleRefined", session.titleRefined)
+            .put("compactedSummary", session.compactedSummary)
+            .put("summarizedUntilMessage", session.summarizedUntilMessage)
+            .put("messagesSinceSummary", session.messagesSinceSummary)
             .put("messages", messages)
     }
 
@@ -125,14 +165,19 @@ object ChatHistoryStore {
                     )
                 )
             }
+            val updatedAt = obj.optLong("updatedAt")
             result.add(
                 ChatSession(
                     id = obj.optString("id"),
                     title = obj.optString("title", "New chat"),
                     summary = obj.optString("summary"),
                     lastMessage = obj.optString("lastMessage"),
-                    updatedAt = obj.optLong("updatedAt"),
+                    updatedAt = updatedAt,
                     titleRefined = obj.optBoolean("titleRefined", false),
+                    compactedSummary = obj.optString("compactedSummary"),
+                    summarizedUntilMessage = obj.optInt("summarizedUntilMessage", 0),
+                    messagesSinceSummary = obj.optInt("messagesSinceSummary", 0),
+                    createdAt = obj.optLong("createdAt", updatedAt),
                     messages = messages
                 )
             )
