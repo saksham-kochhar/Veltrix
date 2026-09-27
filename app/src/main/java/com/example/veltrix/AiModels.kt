@@ -32,7 +32,17 @@ data class AiProvider(
 
 object AiModels {
     const val OFFLINE_DISPLAY = "Qwen 2.5"
-    const val DEFAULT_ONLINE_ID = "openrouter/free"
+    const val DEFAULT_ONLINE_ID = "openrouter/auto"
+    private const val LEGACY_AUTO_ACCESS_ID = "openrouter/free"
+
+    val auto = AiModelOption(
+        id = DEFAULT_ONLINE_ID,
+        displayName = "Auto",
+        icon = Icons.Outlined.AutoAwesome,
+        tint = Color(0xFF5B4DFF),
+        minTier = "free",
+        providerId = "auto"
+    )
 
     val offline = AiModelOption(
         id = "local/qwen-2.5",
@@ -52,13 +62,6 @@ object AiModels {
 
     /** Full PRD v1.0 catalog; server sets which entries are allowed per user. */
     val providers: List<AiProvider> = listOf(
-        provider(
-            id = "veltrix",
-            displayName = "Veltrix",
-            icon = Icons.Outlined.AutoAwesome,
-            tint = Color(0xFF5B4DFF),
-            "openrouter/free" to "OpenRouter Free" to "free"
-        ),
         provider(
             id = "nvidia",
             displayName = "NVIDIA",
@@ -187,19 +190,76 @@ object AiModels {
             "anthropic/claude-sonnet-5" to "Claude Sonnet 5" to "ultra",
             "anthropic/claude-opus-4-8" to "Claude Opus 4.8" to "ultra"
         )
-    )
+    ).let { sortProviderCatalog(it) }
 
-    val online: List<AiModelOption> = providers.flatMap { it.models }
+    val standaloneOnline: List<AiModelOption> = sortStandaloneCatalog(listOf(auto))
+
+    val online: List<AiModelOption> = standaloneOnline + providers.flatMap { it.models }
+
+    fun sortProviderCatalog(catalog: List<AiProvider>): List<AiProvider> =
+        catalog
+            .sortedBy { it.displayName.lowercase() }
+            .map { provider ->
+                provider.copy(
+                    models = provider.models.sortedBy { it.displayName.lowercase() }
+                )
+            }
+
+    fun sortStandaloneCatalog(catalog: List<AiModelOption>): List<AiModelOption> =
+        catalog.sortedBy { it.displayName.lowercase() }
+
+    fun filterPickerCatalog(
+        query: String,
+        standalone: List<AiModelOption>,
+        providerList: List<AiProvider>
+    ): Pair<List<AiModelOption>, List<AiProvider>> {
+        val normalized = query.trim().lowercase()
+        if (normalized.isEmpty()) return standalone to providerList
+
+        val filteredStandalone = standalone.filter { modelMatchesQuery(it, normalized) }
+        val filteredProviders = providerList.mapNotNull { provider ->
+            val providerMatches =
+                provider.displayName.lowercase().contains(normalized) ||
+                    provider.id.lowercase().contains(normalized)
+            val matchingModels = provider.models.filter { modelMatchesQuery(it, normalized) }
+            when {
+                providerMatches -> provider
+                matchingModels.isNotEmpty() -> provider.copy(models = matchingModels)
+                else -> null
+            }
+        }
+        return filteredStandalone to filteredProviders
+    }
+
+    fun filterPickerByPlanIncluded(
+        standalone: List<AiModelOption>,
+        providerList: List<AiProvider>,
+        access: Map<String, Boolean>?
+    ): Pair<List<AiModelOption>, List<AiProvider>> {
+        val filteredStandalone = standalone.filter { isModelAllowed(it.id, access) }
+        val filteredProviders = providerList.mapNotNull { provider ->
+            val allowedModels = provider.models.filter { isModelAllowed(it.id, access) }
+            if (allowedModels.isEmpty()) null else provider.copy(models = allowedModels)
+        }
+        return filteredStandalone to filteredProviders
+    }
+
+    private fun modelMatchesQuery(model: AiModelOption, query: String): Boolean =
+        model.displayName.lowercase().contains(query) || model.id.lowercase().contains(query)
 
     fun isModelAllowed(modelId: String, access: Map<String, Boolean>?): Boolean {
         if (access == null || access.isEmpty()) {
             return find(modelId)?.minTier == "free"
         }
-        return access[modelId] == true
+        if (access[modelId] == true) return true
+        if (modelId == auto.id && access[LEGACY_AUTO_ACCESS_ID] == true) return true
+        return false
     }
 
-    fun find(id: String): AiModelOption? =
-        online.find { it.id == id } ?: offline.takeIf { it.id == id }
+    fun find(id: String): AiModelOption? {
+        val resolvedId = if (id == LEGACY_AUTO_ACCESS_ID) auto.id else id
+        return online.find { it.id == resolvedId } ?: offline.takeIf { it.id == resolvedId }
+    }
 
     fun providerOf(id: String): AiProvider? =
         providers.find { provider -> provider.models.any { it.id == id } }

@@ -124,10 +124,11 @@ class veltrixviewmodel : ViewModel(){
             }?.let { (wallet, access) ->
                 walletSnapshot = wallet
                 onlineModelAccess = access
-                if (OnlineMode && access.isNotEmpty() && access[selectedModelId] != true) {
-                    selectedModelId = access.entries.firstOrNull { it.value && it.key == AiModels.DEFAULT_ONLINE_ID }?.key
-                        ?: access.entries.firstOrNull { it.value }?.key
-                        ?: AiModels.DEFAULT_ONLINE_ID
+                if (OnlineMode && access.isNotEmpty() && !AiModels.isModelAllowed(selectedModelId, access)) {
+                    selectedModelId = when {
+                        AiModels.isModelAllowed(AiModels.DEFAULT_ONLINE_ID, access) -> AiModels.DEFAULT_ONLINE_ID
+                        else -> access.entries.firstOrNull { it.value }?.key ?: AiModels.DEFAULT_ONLINE_ID
+                    }
                 }
             }
         }

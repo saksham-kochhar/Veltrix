@@ -4,7 +4,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -17,6 +19,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,6 +41,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -58,6 +63,8 @@ import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.material.icons.outlined.WifiOff
@@ -70,34 +77,44 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ripple
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -105,7 +122,9 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.NavHostController
 import com.example.veltrix.AiModelOption
+import com.example.veltrix.ProviderLogos
 import com.example.veltrix.AiModels
+import com.example.veltrix.R
 import com.example.veltrix.AiProvider
 import com.example.veltrix.Instruction
 import com.example.veltrix.Navigation.Routes
@@ -133,6 +152,7 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
     val context = LocalContext.current
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val userProfile by viewmodel.userProfile.collectAsState()
 
     LaunchedEffect(Unit) {
         viewmodel.initChatHistory(context)
@@ -160,9 +180,8 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
                     viewmodel.openSession(context, id)
                     scope.launch { drawerState.close() }
                 },
-                onClose = {
-                    scope.launch { drawerState.close() }
-                },
+                firstName = userProfile?.firstname,
+                lastName = userProfile?.lastname,
                 onOpenAccount = {
                     scope.launch {
                         drawerState.close()
@@ -189,6 +208,11 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
             } else {
                 AiModels.OFFLINE_DISPLAY
             }
+            val selectedProvider = if (viewmodel.OnlineMode) {
+                AiModels.providerOf(selectedModelId)
+            } else {
+                AiModels.offlineProvider
+            }
             val modelIcon = when {
                 !viewmodel.OnlineMode -> AiModels.offline.icon
                 else -> selectedOnline?.icon ?: Icons.Outlined.AutoAwesome
@@ -197,6 +221,7 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
                 !viewmodel.OnlineMode -> AiModels.offline.tint
                 else -> selectedOnline?.tint ?: Color(0xFF5B4DFF)
             }
+            val modelLogoRes = selectedProvider?.let { ProviderLogos.resFor(it.id) }
             val headerProviders = if (viewmodel.OnlineMode) {
                 AiModels.providers
             } else {
@@ -266,6 +291,7 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
                     displayName = displayModel,
                     icon = modelIcon,
                     iconTint = modelIconTint,
+                    logoResId = modelLogoRes,
                     providers = headerProviders,
                     selectedId = headerSelectedModelId,
                     modelAccess = modelAccess,
@@ -564,8 +590,26 @@ fun ModelLogoBadge(
     name: String,
     modifier: Modifier = Modifier,
     size: Dp = 44.dp,
-    iconSize: Dp = 22.dp
+    iconSize: Dp = 22.dp,
+    logoResId: Int? = null
 ) {
+    if (logoResId != null) {
+        Box(
+            modifier = modifier
+                .size(size)
+                .clip(CircleShape)
+                .background(Color(0xFFF5F6FA)),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                painter = painterResource(id = logoResId),
+                contentDescription = name,
+                modifier = Modifier.size(size - 10.dp),
+                contentScale = ContentScale.Fit
+            )
+        }
+        return
+    }
     Box(
         modifier = modifier
             .size(size)
@@ -588,6 +632,7 @@ fun HeaderModelSelector(
     displayName: String,
     icon: ImageVector,
     iconTint: Color,
+    logoResId: Int? = null,
     providers: List<AiProvider>,
     selectedId: String,
     modelAccess: Map<String, Boolean>?,
@@ -596,17 +641,36 @@ fun HeaderModelSelector(
 ) {
     var showPicker by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.9f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "headerModelPressScale"
+    )
 
     ModelLogoBadge(
         icon = icon,
         tint = iconTint,
         name = displayName,
-        modifier = Modifier.clickable { showPicker = true }
+        logoResId = logoResId,
+        modifier = Modifier
+            .scale(pressScale)
+            .clip(CircleShape)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = ripple(bounded = true),
+                onClick = { showPicker = true }
+            )
     )
 
     if (showPicker) {
         ModelProviderSheet(
             sheetState = sheetState,
+            standaloneModels = AiModels.standaloneOnline,
             providers = providers,
             selectedId = selectedId,
             modelAccess = modelAccess,
@@ -620,10 +684,84 @@ fun HeaderModelSelector(
     }
 }
 
+@Composable
+private fun ModelPickerPlanFilterToggle(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val accent = Color(0xFF5B4DFF)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFFF5F5FA))
+            .padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = "Only included models",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            color = Color(0xFF1A1A3A),
+            modifier = Modifier.weight(1f)
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = accent,
+                uncheckedThumbColor = Color.White,
+                uncheckedTrackColor = Color(0xFFD4D4DC),
+                uncheckedBorderColor = Color.Transparent
+            )
+        )
+    }
+}
+
+@Composable
+private fun ModelPickerNoResults(
+    query: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Image(
+            painter = painterResource(R.drawable.ic_model_search_empty),
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxWidth(0.62f)
+                .heightIn(max = 200.dp)
+                .padding(bottom = 12.dp),
+            contentScale = ContentScale.Fit
+        )
+        Text(
+            text = "No models found",
+            fontWeight = FontWeight.Bold,
+            fontSize = 20.sp,
+            color = Color(0xFF1A1A3A)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "We couldn't find any models matching \"$query\"",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            color = Color(0xFF8A8A98),
+            textAlign = TextAlign.Center,
+            lineHeight = 20.sp
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelProviderSheet(
     sheetState: SheetState,
+    standaloneModels: List<AiModelOption>,
     providers: List<AiProvider>,
     selectedId: String,
     modelAccess: Map<String, Boolean>?,
@@ -631,10 +769,45 @@ fun ModelProviderSheet(
     onDismiss: () -> Unit,
     onSelect: (String) -> Unit
 ) {
-    val selectedProviderId = remember(selectedId, providers) {
-        providers.find { provider -> provider.models.any { it.id == selectedId } }?.id
+    val context = LocalContext.current
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var onlyIncludedModels by rememberSaveable { mutableStateOf(false) }
+    val sortedStandalone = remember(standaloneModels) {
+        AiModels.sortStandaloneCatalog(standaloneModels)
+    }
+    val sortedProviders = remember(providers) {
+        AiModels.sortProviderCatalog(providers)
+    }
+    val (visibleStandalone, visibleProviders) = remember(
+        searchQuery,
+        onlyIncludedModels,
+        sortedStandalone,
+        sortedProviders,
+        modelAccess
+    ) {
+        val (fromSearchStandalone, fromSearchProviders) = AiModels.filterPickerCatalog(
+            searchQuery,
+            sortedStandalone,
+            sortedProviders
+        )
+        if (!onlyIncludedModels) {
+            fromSearchStandalone to fromSearchProviders
+        } else {
+            AiModels.filterPickerByPlanIncluded(
+                fromSearchStandalone,
+                fromSearchProviders,
+                modelAccess
+            )
+        }
+    }
+    val searchActive = searchQuery.trim().isNotEmpty()
+    val selectedProviderId = remember(selectedId, sortedProviders) {
+        sortedProviders.find { provider -> provider.models.any { it.id == selectedId } }?.id
     }
     var expandedProviderId by remember { mutableStateOf(selectedProviderId) }
+
+    val sheetHeight = (LocalConfiguration.current.screenHeightDp * 0.7f).dp
+    val listScrollState = rememberScrollState()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -645,7 +818,7 @@ fun ModelProviderSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .height(sheetHeight)
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 36.dp)
         ) {
@@ -662,22 +835,171 @@ fun ModelProviderSheet(
                 fontSize = 14.sp,
                 color = Color(0xFF8A8A98)
             )
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            providers.forEach { provider ->
-                ProviderAccordion(
-                    provider = provider,
-                    selectedId = selectedId,
-                    modelAccess = modelAccess,
-                    freeOnlyMode = freeOnlyMode,
-                    expanded = expandedProviderId == provider.id,
-                    onToggle = {
-                        expandedProviderId =
-                            if (expandedProviderId == provider.id) null else provider.id
-                    },
-                    onSelect = onSelect
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFFF0F1F5))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Search,
+                    contentDescription = null,
+                    tint = Color(0xFF8A8A98),
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.width(10.dp))
+                BasicTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        fontSize = 15.sp,
+                        color = Color(0xFF1A1A3A)
+                    ),
+                    decorationBox = { inner ->
+                        if (searchQuery.isEmpty()) {
+                            Text(
+                                text = "Search providers or models",
+                                fontSize = 15.sp,
+                                color = Color(0xFF8A8A98)
+                            )
+                        }
+                        inner()
+                    }
+                )
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(
+                        onClick = { searchQuery = "" },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = "Clear search",
+                            tint = Color(0xFF8A8A98),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            val listEmpty = visibleStandalone.isEmpty() && visibleProviders.isEmpty()
+            val noSearchResults = searchActive && listEmpty
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                if (noSearchResults) {
+                    ModelPickerNoResults(
+                        query = searchQuery.trim(),
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(horizontal = 8.dp)
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(listScrollState)
+                    ) {
+                val autoModel = visibleStandalone.find { it.id == AiModels.auto.id }
+                val otherStandalone = visibleStandalone.filter { it.id != AiModels.auto.id }
+
+                autoModel?.let { model ->
+                    val allowed = AiModels.isModelAllowed(model.id, modelAccess)
+                    ProviderModelRow(
+                        model = model,
+                        selected = model.id == selectedId,
+                        allowed = allowed,
+                        freeOnlyMode = freeOnlyMode,
+                        showTierLabel = false,
+                        onClick = {
+                            if (allowed) {
+                                onSelect(model.id)
+                            } else {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    AiModels.lockLabel(model.minTier, freeOnlyMode),
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    ModelPickerPlanFilterToggle(
+                        checked = onlyIncludedModels,
+                        onCheckedChange = { onlyIncludedModels = it }
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
+                if (autoModel == null) {
+                    ModelPickerPlanFilterToggle(
+                        checked = onlyIncludedModels,
+                        onCheckedChange = { onlyIncludedModels = it }
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
+                if (listEmpty && onlyIncludedModels && !searchActive) {
+                    Text(
+                        text = "No models included in your plan.",
+                        fontSize = 14.sp,
+                        color = Color(0xFF8A8A98),
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+                }
+
+                otherStandalone.forEach { model ->
+                    val allowed = AiModels.isModelAllowed(model.id, modelAccess)
+                    ProviderModelRow(
+                        model = model,
+                        selected = model.id == selectedId,
+                        allowed = allowed,
+                        freeOnlyMode = freeOnlyMode,
+                        showTierLabel = model.id != AiModels.auto.id,
+                        onClick = {
+                            if (allowed) {
+                                onSelect(model.id)
+                            } else {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    AiModels.lockLabel(model.minTier, freeOnlyMode),
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
+                visibleProviders.forEach { provider ->
+                    ProviderAccordion(
+                        provider = provider,
+                        selectedId = selectedId,
+                        modelAccess = modelAccess,
+                        freeOnlyMode = freeOnlyMode,
+                        expanded = searchActive || expandedProviderId == provider.id,
+                        onToggle = {
+                            if (!searchActive) {
+                                expandedProviderId =
+                                    if (expandedProviderId == provider.id) null else provider.id
+                            }
+                        },
+                        onSelect = onSelect
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+                    }
+                }
             }
         }
     }
@@ -723,8 +1045,9 @@ fun ProviderAccordion(
                 icon = provider.icon,
                 tint = provider.tint,
                 name = provider.displayName,
-                size = 36.dp,
-                iconSize = 18.dp
+                size = 44.dp,
+                iconSize = 18.dp,
+                logoResId = ProviderLogos.resFor(provider.id)
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -790,6 +1113,7 @@ fun ProviderModelRow(
     selected: Boolean,
     allowed: Boolean,
     freeOnlyMode: Boolean,
+    showTierLabel: Boolean = true,
     onClick: () -> Unit
 ) {
     val accent = Color(0xFF5B4DFF)
@@ -821,15 +1145,17 @@ fun ProviderModelRow(
                 fontSize = 15.sp,
                 color = if (allowed) Color(0xFF1A1A3A) else muted
             )
-            Text(
-                text = if (allowed) {
-                    AiModels.tierLabel(model.minTier)
-                } else {
-                    AiModels.lockLabel(model.minTier, freeOnlyMode)
-                },
-                fontSize = 12.sp,
-                color = if (allowed) Color(0xFF8A8A98) else Color(0xFFE57373)
-            )
+            if (showTierLabel || !allowed) {
+                Text(
+                    text = if (allowed) {
+                        AiModels.tierLabel(model.minTier)
+                    } else {
+                        AiModels.lockLabel(model.minTier, freeOnlyMode)
+                    },
+                    fontSize = 12.sp,
+                    color = if (allowed) Color(0xFF8A8A98) else Color(0xFFE57373)
+                )
+            }
         }
         if (!allowed) {
             Icon(

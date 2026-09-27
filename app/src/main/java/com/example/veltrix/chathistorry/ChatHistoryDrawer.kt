@@ -20,14 +20,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -46,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.veltrix.Screen.ProfileAvatar
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -66,8 +64,9 @@ fun ChatHistoryDrawerContent(
     statusMessage: String?,
     onNewChat: () -> Unit,
     onOpenSession: (String) -> Unit,
-    onClose: () -> Unit,
-    onOpenAccount: () -> Unit
+    onOpenAccount: () -> Unit,
+    firstName: String? = null,
+    lastName: String? = null
 ) {
     var searchQuery by remember { mutableStateOf("") }
     val filteredSessions = remember(sessions, searchQuery) {
@@ -107,20 +106,13 @@ fun ChatHistoryDrawerContent(
                     fontWeight = FontWeight.Bold,
                     color = HistoryNavy
                 )
-                IconButton(
-                    onClick = onClose,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(HistoryNewChatBg)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Close,
-                        contentDescription = "Close history",
-                        tint = HistoryPurple,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
+                ProfileAvatar(
+                    firstName = firstName,
+                    lastName = lastName,
+                    size = 40.dp,
+                    fontSize = 14.sp,
+                    modifier = Modifier.clickable(onClick = onOpenAccount)
+                )
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -229,47 +221,6 @@ fun ChatHistoryDrawerContent(
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-            HorizontalDivider(color = Color(0xFFF0F0F5))
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .clickable(onClick = onOpenAccount)
-                    .padding(horizontal = 8.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(HistoryNewChatBg),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Person,
-                        contentDescription = null,
-                        tint = HistoryPurple,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(
-                        text = "Account",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = HistoryNavy
-                    )
-                    Text(
-                        text = "Profile and settings",
-                        fontSize = 12.sp,
-                        color = HistoryMuted
-                    )
-                }
-            }
         }
     }
 }

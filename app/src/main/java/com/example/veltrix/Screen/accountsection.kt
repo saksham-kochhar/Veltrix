@@ -1,13 +1,16 @@
 package com.example.veltrix.Screen
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -16,9 +19,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.automirrored.outlined.Logout
-import androidx.compose.material.icons.filled.ArrowBackIosNew
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Diamond
 import androidx.compose.material.icons.filled.KeyboardArrowRight
@@ -26,6 +29,7 @@ import androidx.compose.material.icons.filled.Redeem
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CreditCard
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Security
@@ -33,21 +37,29 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -55,11 +67,18 @@ import com.example.veltrix.Navigation.Routes
 import com.example.veltrix.WalletSnapshot
 import com.example.veltrix.veltrixviewmodel
 
+private val AccountBg = Color(0xFFF5F6FA)
+private val AccountNavy = Color(0xFF1A1A3A)
+private val AccountMuted = Color(0xFF8A8A98)
+private val AccountAccent = Color(0xFF5B4DFF)
+private val AccountTrack = Color(0xFFE8E8F0)
+
 @Composable
 fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel) {
     val profile by viewmodel.userProfile.collectAsState()
     val plan = profile?.plan?.lowercase() ?: "free"
     val wallet = viewmodel.walletSnapshot
+    var accountMenuExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewmodel.fetchWallet()
@@ -70,85 +89,113 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel)
         AccountMenuItem(
             title = "Profile Information",
             subtitle = "View and edit your personal details",
-            icon = Icons.Outlined.Person
+            icon = Icons.Outlined.Person,
+            iconBg = Color(0xFFE8F8EF),
+            iconTint = Color(0xFF16A34A)
         ),
         AccountMenuItem(
             title = "Security",
             subtitle = "Password, 2FA and account security",
-            icon = Icons.Outlined.Security
+            icon = Icons.Outlined.Security,
+            iconBg = Color(0xFFE8F0FF),
+            iconTint = Color(0xFF2563EB)
         ),
         AccountMenuItem(
             title = "Notifications",
             subtitle = "Manage your notification preferences",
-            icon = Icons.Outlined.Notifications
+            icon = Icons.Outlined.Notifications,
+            iconBg = Color(0xFFF3E8FF),
+            iconTint = Color(0xFF7C4DFF)
         ),
         AccountMenuItem(
             title = "Offline Data",
             subtitle = "Manage downloaded models and data",
-            icon = Icons.Outlined.CloudDownload
+            icon = Icons.Outlined.CloudDownload,
+            iconBg = Color(0xFFE0F7FA),
+            iconTint = Color(0xFF009688)
         ),
         AccountMenuItem(
             title = "Billing & Subscription",
             subtitle = "Manage your payments and plan",
-            icon = Icons.Outlined.CreditCard
+            icon = Icons.Outlined.CreditCard,
+            iconBg = Color(0xFFFFF3E0),
+            iconTint = Color(0xFFF57C00)
         ),
         AccountMenuItem(
             title = "Help & Support",
             subtitle = "Get help and contact support",
-            icon = Icons.AutoMirrored.Outlined.HelpOutline
+            icon = Icons.AutoMirrored.Outlined.HelpOutline,
+            iconBg = Color(0xFFFCE8F3),
+            iconTint = Color(0xFFE91E8C)
         )
     )
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF8F8F8))
+            .background(AccountBg)
             .padding(horizontal = 20.dp)
     ) {
         item {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(40.dp))
 
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Surface(
-                    onClick = { navcontroller.popBackStack() },
-                    shape = CircleShape,
-                    color = Color.White,
-                    shadowElevation = 4.dp,
-                    modifier = Modifier.size(44.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Default.ArrowBackIosNew,
-                            contentDescription = "Back",
-                            modifier = Modifier.size(18.dp),
-                            tint = Color(0xFF555555)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(28.dp))
-
-            Box(
                 modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .clickable { navcontroller.popBackStack() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color(0xFF1C1C3A),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+
+                Box {
                     Box(
                         modifier = Modifier
-                            .size(140.dp)
+                            .size(44.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFE9FFF0))
-                    )
-                    ProfileAvatar(
-                        firstName = profile?.firstname,
-                        lastName = profile?.lastname,
-                        size = 108.dp,
-                        fontSize = 38.sp
-                    )
+                            .clickable { accountMenuExpanded = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.MoreVert,
+                            contentDescription = "Account menu",
+                            tint = Color(0xFF1C1C3A),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = accountMenuExpanded,
+                        onDismissRequest = { accountMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Log out") },
+                            onClick = {
+                                accountMenuExpanded = false
+                                viewmodel.signout()
+                                navcontroller.navigate(Routes.Auth) {
+                                    popUpTo(0) { inclusive = true }
+                                }
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.AutoMirrored.Outlined.Logout,
+                                    contentDescription = null,
+                                    tint = Color(0xFFE53935)
+                                )
+                            }
+                        )
+                    }
                 }
             }
 
@@ -156,144 +203,98 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel)
 
             Text(
                 text = "Account",
-                fontSize = 32.sp,
+                fontSize = 26.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center,
-                color = Color(0xFF111133)
+                color = AccountNavy
             )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "Manage your profile and preferences",
-                color = Color.Gray,
-                fontSize = 15.sp,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center
+                color = AccountMuted,
+                fontSize = 14.sp
             )
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(20.dp))
         }
 
         item {
             Card(
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { }
                     ) {
+                        ProfileAvatar(
+                            firstName = profile?.firstname,
+                            lastName = profile?.lastname,
+                            size = 48.dp,
+                            fontSize = 16.sp
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = fullName.ifEmpty { "User" },
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 20.sp,
-                                color = Color(0xFF111133)
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 16.sp,
+                                color = AccountNavy
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = profile?.email ?: "Unable to fetch details",
-                                color = Color.Gray,
-                                fontSize = 14.sp
+                                color = AccountMuted,
+                                fontSize = 13.sp,
+                                maxLines = 1
                             )
                         }
                         Icon(
                             Icons.Default.KeyboardArrowRight,
                             contentDescription = null,
-                            tint = Color(0xFFBBBBBB)
+                            tint = Color(0xFFC8C8D4)
                         )
                     }
 
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    PlanStatusBanner(
+                        plan = plan,
+                        freeOnlyMode = wallet.freeOnlyMode,
+                        onViewPlan = { navcontroller.navigate(Routes.details) }
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider(color = Color(0xFFF0F0F5))
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    PlanStatusBanner(plan = plan, freeOnlyMode = wallet.freeOnlyMode)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    CreditsAllowanceCard(wallet = wallet)
+                    UsageAllowanceSection(wallet = wallet)
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(20.dp))
         }
 
         item {
-            Text(
-                text = "Account",
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp,
-                color = Color(0xFF111133)
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
-        }
-
-        items(menuItems.size) { index ->
-            AccountMenuRow(menuItems[index])
-            if (index != menuItems.lastIndex) {
-                Spacer(modifier = Modifier.height(10.dp))
-            }
-        }
-
-        item {
-            Spacer(modifier = Modifier.height(24.dp))
-
             Card(
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3F3)),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            viewmodel.signout()
-                            navcontroller.navigate(Routes.Auth) {
-                                popUpTo(0) { inclusive = true }
-                            }
+                Column {
+                    menuItems.forEachIndexed { index, item ->
+                        AccountMenuRow(item)
+                        if (index != menuItems.lastIndex) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                color = Color(0xFFF0F0F5)
+                            )
                         }
-                        .padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(50.dp)
-                            .background(Color(0xFFFFE5E5), RoundedCornerShape(14.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Outlined.Logout,
-                            contentDescription = null,
-                            tint = Color(0xFFE53935)
-                        )
                     }
-
-                    Spacer(modifier = Modifier.width(16.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            "Log Out",
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFE53935)
-                        )
-                        Text(
-                            "Sign out from your account",
-                            color = Color.Gray,
-                            fontSize = 13.sp
-                        )
-                    }
-
-                    Icon(
-                        Icons.Default.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = Color(0xFFBBBBBB)
-                    )
                 }
             }
 
@@ -303,59 +304,118 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel)
 }
 
 @Composable
-private fun CreditsAllowanceCard(wallet: WalletSnapshot) {
-    val progress = if (wallet.creditsLimit > 0) {
-        (wallet.creditsUsed.toFloat() / wallet.creditsLimit).coerceIn(0f, 1f)
-    } else {
-        0f
+private fun UsageAllowanceSection(wallet: WalletSnapshot) {
+    val monthlyPercent = usagePercent(wallet.creditsUsed, wallet.creditsLimit)
+    val dailyPercent = usagePercent(wallet.creditsUsedToday, wallet.creditsLimitDay)
+
+    Text(
+        text = "Usage",
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp,
+        color = AccountNavy
+    )
+    Spacer(modifier = Modifier.height(12.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceEvenly
+    ) {
+        UsagePercentRing(
+            label = "This month",
+            percent = monthlyPercent,
+            accent = AccountAccent,
+            modifier = Modifier.weight(1f)
+        )
+        UsagePercentRing(
+            label = "Today",
+            percent = dailyPercent,
+            accent = Color(0xFF00A651),
+            modifier = Modifier.weight(1f)
+        )
     }
-    Column(modifier = Modifier.fillMaxWidth()) {
+    if (wallet.freeOnlyMode) {
+        Spacer(modifier = Modifier.height(10.dp))
         Text(
-            text = "AI credits this period",
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 14.sp,
-            color = Color(0xFF333355)
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(8.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(Color(0xFFE8E8F0))
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(progress)
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFF5B4DFF))
-            )
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "${wallet.creditsUsed} / ${wallet.creditsLimit} credits",
-            fontSize = 13.sp,
-            color = Color(0xFF555577)
-        )
-        Text(
-            text = "Today: ${wallet.creditsUsedToday} / ${wallet.creditsLimitDay} · 12h: ${wallet.creditsUsed12h} / ${wallet.creditsLimit12h}",
+            text = "Monthly allowance reached — free models only until reset.",
             fontSize = 12.sp,
-            color = Color.Gray
+            color = Color(0xFFB45309),
+            lineHeight = 16.sp
         )
-        if (wallet.freeOnlyMode) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = "Monthly credits used — free models only until reset.",
-                fontSize = 12.sp,
-                color = Color(0xFFB45309)
-            )
-        }
     }
 }
 
 @Composable
-private fun PlanStatusBanner(plan: String, freeOnlyMode: Boolean = false) {
+private fun UsagePercentRing(
+    label: String,
+    percent: Int,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier.size(88.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val strokeWidth = 9.dp.toPx()
+                val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                val diameter = size.minDimension - strokeWidth
+                val topLeft = Offset(
+                    (size.width - diameter) / 2f,
+                    (size.height - diameter) / 2f
+                )
+                val arcSize = Size(diameter, diameter)
+                drawArc(
+                    color = AccountTrack,
+                    startAngle = -90f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = stroke
+                )
+                drawArc(
+                    color = accent,
+                    startAngle = -90f,
+                    sweepAngle = 360f * (percent / 100f),
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = stroke
+                )
+            }
+            Text(
+                text = "$percent%",
+                fontWeight = FontWeight.Bold,
+                fontSize = 17.sp,
+                color = AccountNavy
+            )
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = label,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            color = AccountMuted
+        )
+    }
+}
+
+private fun usagePercent(used: Long, limit: Long): Int {
+    if (limit <= 0L) return 0
+    return ((used.toDouble() / limit.toDouble()) * 100.0)
+        .toInt()
+        .coerceIn(0, 100)
+}
+
+@Composable
+private fun PlanStatusBanner(
+    plan: String,
+    freeOnlyMode: Boolean = false,
+    onViewPlan: () -> Unit = {}
+) {
     val (bannerBg, accentColor, title, subtitle, icon) = when (plan) {
         "pro" -> PlanBannerStyle(
             bannerBg = Color(0xFFE9FFF0),
@@ -382,8 +442,8 @@ private fun PlanStatusBanner(plan: String, freeOnlyMode: Boolean = false) {
         )
 
         else -> PlanBannerStyle(
-            bannerBg = Color(0xFFF3E8FF),
-            accentColor = Color(0xFF8543C0),
+            bannerBg = Color(0xFFF0EEFF),
+            accentColor = AccountAccent,
             title = "You're on Free",
             subtitle = "Upgrade for a better experience",
             icon = Icons.Default.Redeem
@@ -392,18 +452,18 @@ private fun PlanStatusBanner(plan: String, freeOnlyMode: Boolean = false) {
 
     Surface(
         color = bannerBg,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(horizontal = 12.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(40.dp)
                     .clip(CircleShape)
                     .background(Color.White),
                 contentAlignment = Alignment.Center
@@ -412,36 +472,38 @@ private fun PlanStatusBanner(plan: String, freeOnlyMode: Boolean = false) {
                     imageVector = if (plan == "pro") Icons.Default.AutoAwesome else icon,
                     contentDescription = null,
                     tint = accentColor,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(20.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.width(14.dp))
+            Spacer(modifier = Modifier.width(10.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.SemiBold,
                     color = accentColor,
-                    fontSize = 16.sp
+                    fontSize = 14.sp
                 )
                 Text(
                     text = subtitle,
-                    color = accentColor.copy(alpha = 0.75f),
-                    fontSize = 13.sp
+                    color = accentColor.copy(alpha = 0.8f),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
                 )
             }
 
             Button(
-                onClick = {},
-                shape = RoundedCornerShape(12.dp),
+                onClick = onViewPlan,
+                shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                contentPadding = ButtonDefaults.ContentPadding
+                contentPadding = ButtonDefaults.ContentPadding,
+                modifier = Modifier.height(36.dp)
             ) {
                 Text(
                     text = "View Plan",
                     color = Color.White,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold
                 )
             }
@@ -459,50 +521,59 @@ private data class PlanBannerStyle(
 
 @Composable
 fun AccountMenuRow(item: AccountMenuItem) {
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier.fillMaxWidth()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 72.dp)
+            .clickable { }
+            .padding(horizontal = 18.dp, vertical = 18.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .clickable { }
-                .padding(18.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .size(44.dp)
+                .background(item.iconBg, RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .size(50.dp)
-                    .background(Color(0xFFEAF8EE), RoundedCornerShape(14.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(item.icon, contentDescription = null, tint = Color(0xFF16A34A))
-            }
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    item.title,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF111133)
-                )
-                Text(item.subtitle, color = Color.Gray, fontSize = 13.sp)
-            }
-
             Icon(
-                Icons.Default.KeyboardArrowRight,
+                item.icon,
                 contentDescription = null,
-                tint = Color(0xFFBBBBBB)
+                tint = item.iconTint,
+                modifier = Modifier.size(22.dp)
             )
         }
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                item.title,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 15.sp,
+                color = AccountNavy
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                item.subtitle,
+                color = AccountMuted,
+                fontSize = 13.sp,
+                lineHeight = 18.sp
+            )
+        }
+
+        Icon(
+            Icons.Default.KeyboardArrowRight,
+            contentDescription = null,
+            tint = Color(0xFFC8C8D4),
+            modifier = Modifier.size(22.dp)
+        )
     }
 }
 
 data class AccountMenuItem(
     val title: String,
     val subtitle: String,
-    val icon: ImageVector
+    val icon: ImageVector,
+    val iconBg: Color = Color(0xFFEAF8EE),
+    val iconTint: Color = Color(0xFF16A34A)
 )

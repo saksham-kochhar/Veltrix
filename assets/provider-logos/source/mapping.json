@@ -1,0 +1,68 @@
+{
+  "providers": {
+    "anthropic": {
+      "file": "anthropic.png",
+      "note": "Claude starburst symbol"
+    },
+    "cohere": {
+      "file": "cohere.png",
+      "note": "Cohere three-shape mark"
+    },
+    "deepseek": {
+      "file": "deepseek.png",
+      "note": "DeepSeek whale"
+    },
+    "dots": {
+      "file": "dots.png",
+      "note": "Dots Studio"
+    },
+    "google": {
+      "file": "google.png",
+      "note": "Google G"
+    },
+    "inclusionai": {
+      "file": "inclusionai.png",
+      "note": "Inclusion AI (angular mark)"
+    },
+    "liquid": {
+      "file": "liquid.png",
+      "note": "Liquid AI solid mark"
+    },
+    "mistral": {
+      "file": "mistral.png",
+      "note": "Mistral pixel M"
+    },
+    "nexagi": {
+      "file": "nexagi.png",
+      "note": "Nex AGI N mark"
+    },
+    "nvidia": {
+      "file": "nvidia.png",
+      "note": "NVIDIA swirl"
+    },
+    "openai": {
+      "file": "openai.png",
+      "note": "OpenAI blossom"
+    },
+    "poolside": {
+      "file": "poolside.png",
+      "note": "Poolside (interwoven rings)"
+    },
+    "qwen": {
+      "file": "qwen.png",
+      "note": "Qwen purple hex"
+    },
+    "thinkingmachines": {
+      "file": "thinkingmachines.png",
+      "note": "Thinking Machines colorful blob mark"
+    },
+    "xai": {
+      "file": "xai.png",
+      "note": "xAI"
+    },
+    "zai": {
+      "file": "zai.png",
+      "note": "Z.ai / GLM"
+    }
+  }
+}
