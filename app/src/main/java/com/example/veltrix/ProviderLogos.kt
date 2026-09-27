@@ -14,13 +14,18 @@ object ProviderLogos {
         "inclusionai" -> R.drawable.ic_provider_inclusionai
         "liquid" -> R.drawable.ic_provider_liquid
         "mistral" -> R.drawable.ic_provider_mistral
+        // Live catalog ids use the vendor-qualified forms below.
+        "nex-agi" -> R.drawable.ic_provider_nexagi
         "nexagi" -> R.drawable.ic_provider_nexagi
         "nvidia" -> R.drawable.ic_provider_nvidia
         "openai" -> R.drawable.ic_provider_openai
+        "openrouter" -> R.drawable.ic_provider_openai
         "poolside" -> R.drawable.ic_provider_poolside
         "qwen" -> R.drawable.ic_provider_qwen
         "thinkingmachines" -> R.drawable.ic_provider_thinkingmachines
+        "x-ai" -> R.drawable.ic_provider_xai
         "xai" -> R.drawable.ic_provider_xai
+        "z-ai" -> R.drawable.ic_provider_zai
         "zai" -> R.drawable.ic_provider_zai
         else -> null
     }

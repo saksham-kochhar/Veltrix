@@ -46,7 +46,9 @@ fun AssistantMarkdownContent(
     MaterialTheme(colorScheme = bubbleColorScheme) {
     Markdown(
         markdownState = markdownState,
-        modifier = Modifier.fillMaxWidth(),
+        // Let ordinary replies measure to their content. The parent message bubble
+        // still applies its maximum width, so longer Markdown responses wrap safely.
+        modifier = Modifier,
         colors = markdownColor(
             text = textColor,
             codeBackground = codeBackgroundHint.copy(alpha = 0.45f),

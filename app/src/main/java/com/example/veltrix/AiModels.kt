@@ -19,7 +19,8 @@ data class AiModelOption(
     val icon: ImageVector,
     val tint: Color,
     val minTier: String = "free",
-    val providerId: String
+    val providerId: String,
+    val supportsImageInput: Boolean = false
 )
 
 data class AiProvider(
@@ -254,6 +255,16 @@ object AiModels {
         if (access[modelId] == true) return true
         if (modelId == auto.id && access[LEGACY_AUTO_ACCESS_ID] == true) return true
         return false
+    }
+
+    fun supportsImageInput(modelId: String, remoteSupport: Map<String, Boolean>? = null): Boolean {
+        remoteSupport?.let { support ->
+            support[modelId]?.let { return it }
+            if (modelId == auto.id) {
+                support[LEGACY_AUTO_ACCESS_ID]?.let { return it }
+            }
+        }
+        return find(modelId)?.supportsImageInput == true
     }
 
     fun find(id: String): AiModelOption? {

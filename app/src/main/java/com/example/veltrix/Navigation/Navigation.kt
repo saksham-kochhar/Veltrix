@@ -8,6 +8,7 @@ import com.example.veltrix.Screen.AccountScreen
 import com.example.veltrix.Screen.AuthScreen
 import com.example.veltrix.Screen.ChatbotScreen
 import com.example.veltrix.Screen.PlanSelectionScreen
+import com.example.veltrix.Screen.ProfileInformationScreen
 import com.example.veltrix.Screen.VerificationScreen
 import com.example.veltrix.veltrixviewmodel
 
@@ -31,6 +32,9 @@ fun navigation(viewModel: veltrixviewmodel, onGoogleClick: () -> Unit) {
         }
         composable(Routes.account) {
             AccountScreen(navController, viewModel)
+        }
+        composable(Routes.profile) {
+            ProfileInformationScreen(navController, viewModel)
         }
         composable(Routes.details) {
             PlanSelectionScreen(viewModel, navController)

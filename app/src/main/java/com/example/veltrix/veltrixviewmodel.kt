@@ -9,6 +9,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Hub
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -82,6 +86,14 @@ class veltrixviewmodel : ViewModel(){
     var onlineModelAccess by mutableStateOf<Map<String, Boolean>?>(null)
         private set
 
+    /** Catalog model id -> supports image input according to /v1/models/OpenRouter metadata. */
+    var onlineModelImageInputSupport by mutableStateOf<Map<String, Boolean>?>(null)
+        private set
+
+    /** Live OpenRouter catalog grouped by provider for the model picker. */
+    var onlineProviders by mutableStateOf<List<AiProvider>?>(null)
+        private set
+
     companion object {
         private const val BACKEND_BASE = "https://veltrix-backend-nmvy.onrender.com"
         private const val TAG = "ChatHistorySync"
@@ -121,9 +133,12 @@ class veltrixviewmodel : ViewModel(){
                     val models = fetchModelsJson(idToken)
                     Pair(wallet, models)
                 }.getOrNull()
-            }?.let { (wallet, access) ->
+            }?.let { (wallet, models) ->
                 walletSnapshot = wallet
+                val access = models.access
                 onlineModelAccess = access
+                onlineModelImageInputSupport = models.imageInputSupport
+                onlineProviders = models.providers
                 if (OnlineMode && access.isNotEmpty() && !AiModels.isModelAllowed(selectedModelId, access)) {
                     selectedModelId = when {
                         AiModels.isModelAllowed(AiModels.DEFAULT_ONLINE_ID, access) -> AiModels.DEFAULT_ONLINE_ID
@@ -146,7 +161,13 @@ class veltrixviewmodel : ViewModel(){
         return WalletSnapshot.fromJson(org.json.JSONObject(body))
     }
 
-    private fun fetchModelsJson(idToken: String): Map<String, Boolean> {
+    private data class OnlineModelMetadata(
+        val access: Map<String, Boolean>,
+        val imageInputSupport: Map<String, Boolean>,
+        val providers: List<AiProvider>
+    )
+
+    private fun fetchModelsJson(idToken: String): OnlineModelMetadata {
         val url = java.net.URL("$BACKEND_BASE/v1/models")
         val connection = url.openConnection() as java.net.HttpURLConnection
         connection.requestMethod = "GET"
@@ -156,15 +177,69 @@ class veltrixviewmodel : ViewModel(){
         }
         val body = connection.inputStream.bufferedReader().readText()
         val root = org.json.JSONObject(body)
-        val arr = root.optJSONArray("models") ?: return emptyMap()
+        val arr = root.optJSONArray("models") ?: return OnlineModelMetadata(emptyMap(), emptyMap(), emptyList())
         val access = mutableMapOf<String, Boolean>()
+        val imageInputSupport = mutableMapOf<String, Boolean>()
+        val modelsByProvider = linkedMapOf<String, MutableList<AiModelOption>>()
         for (i in 0 until arr.length()) {
             val obj = arr.optJSONObject(i) ?: continue
             val id = obj.optString("id")
             if (id.isBlank()) continue
             access[id] = obj.optBoolean("allowed", false)
+            imageInputSupport[id] = modelSupportsImageInput(obj)
+            val providerId = id.substringBefore('/', missingDelimiterValue = "openrouter")
+            val providerName = providerId
+                .replace('-', ' ')
+                .replace('_', ' ')
+                .split(' ')
+                .filter { it.isNotBlank() }
+                .joinToString(" ") { it.replaceFirstChar(Char::uppercaseChar) }
+            val model = AiModelOption(
+                id = id,
+                displayName = obj.optString("display_name", id.substringAfterLast('/')),
+                icon = Icons.Outlined.AutoAwesome,
+                tint = Color(0xFF5B4DFF),
+                minTier = obj.optString("tier_min", "free"),
+                providerId = providerId,
+                supportsImageInput = modelSupportsImageInput(obj)
+            )
+            modelsByProvider.getOrPut(providerId) { mutableListOf() }.add(model)
         }
-        return access
+        val providers = modelsByProvider.map { (providerId, models) ->
+            AiProvider(
+                id = providerId,
+                displayName = providerName(providerId),
+                icon = Icons.Outlined.Hub,
+                tint = Color(0xFF5B4DFF),
+                models = models.sortedBy { it.displayName.lowercase() }
+            )
+        }.sortedBy { it.displayName.lowercase() }
+        return OnlineModelMetadata(access, imageInputSupport, providers)
+    }
+
+    private fun providerName(id: String): String = id
+        .replace('-', ' ')
+        .replace('_', ' ')
+        .split(' ')
+        .filter { it.isNotBlank() }
+        .joinToString(" ") { it.replaceFirstChar(Char::uppercaseChar) }
+
+    private fun modelSupportsImageInput(model: org.json.JSONObject): Boolean {
+        if (model.optBoolean("supports_image_input", false)) return true
+        if (jsonArrayContainsImage(model.optJSONArray("input_modalities"))) return true
+        if (jsonArrayContainsImage(model.optJSONArray("inputModalities"))) return true
+        if (jsonArrayContainsImage(model.optJSONObject("architecture")?.optJSONArray("input_modalities"))) return true
+        if (jsonArrayContainsImage(model.optJSONObject("architecture")?.optJSONArray("inputModalities"))) return true
+        val modalities = model.optJSONObject("modalities")
+        return jsonArrayContainsImage(modalities?.optJSONArray("input"))
+    }
+
+    private fun jsonArrayContainsImage(array: org.json.JSONArray?): Boolean {
+        if (array == null) return false
+        for (i in 0 until array.length()) {
+            if (array.optString(i).equals("image", ignoreCase = true)) return true
+        }
+        return false
     }
 
     private fun applyWalletFromChatJson(response: String) {
@@ -861,7 +936,10 @@ class veltrixviewmodel : ViewModel(){
 
         userRef.get().addOnSuccessListener { document ->
             if (document.exists()) {
+                // Email is owned by Firebase Authentication, not the editable
+                // profile document. This also repairs any stale legacy value.
                 val profile = document.toObject(UserProfile::class.java)
+                    ?.copy(email = auth.currentUser?.email ?: email)
                 _userProfile.value = profile
                 profileSummary = profile?.profileSummary.orEmpty()
                 summarizedChatCount = profile?.summarizedChatCount ?: 0
@@ -904,6 +982,37 @@ class veltrixviewmodel : ViewModel(){
                     plan = plan, onboardcomplete = true
                 )
                 _authstate.value = Authstate.Authenticated
+                onDone()
+            }
+    }
+
+    fun updateProfile(
+        fullName: String,
+        phoneNumber: String,
+        gender: String,
+        age: Int,
+        onDone: () -> Unit = {}
+    ) {
+        val uid = auth.currentUser?.uid ?: return
+        val parts = fullName.trim().split(Regex("\\s+"), limit = 2)
+        val first = parts.firstOrNull().orEmpty()
+        val last = parts.getOrNull(1).orEmpty()
+        val values = mapOf(
+            "firstname" to first,
+            "lastname" to last,
+            "phoneNumber" to phoneNumber,
+            "gender" to gender,
+            "age" to age
+        )
+        com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            .collection("users").document(uid).update(values)
+            .addOnSuccessListener {
+                firstname = first
+                lastname = last
+                _userProfile.value = _userProfile.value?.copy(
+                    firstname = first, lastname = last,
+                    phoneNumber = phoneNumber, gender = gender, age = age
+                )
                 onDone()
             }
     }
@@ -1089,6 +1198,9 @@ data class UserProfile(
     val email: String = "",
     val firstname: String = "",
     val lastname : String = "",
+    val phoneNumber: String = "",
+    val gender: String = "",
+    val age: Int = 0,
     val plan: String = "",
     val onboardcomplete : Boolean = false,
     val selectedplan : String = "",

@@ -287,7 +287,9 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel)
             ) {
                 Column {
                     menuItems.forEachIndexed { index, item ->
-                        AccountMenuRow(item)
+                        AccountMenuRow(item) {
+                            if (item.title == "Profile Information") navcontroller.navigate(Routes.profile)
+                        }
                         if (index != menuItems.lastIndex) {
                             HorizontalDivider(
                                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -305,8 +307,8 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel)
 
 @Composable
 private fun UsageAllowanceSection(wallet: WalletSnapshot) {
-    val monthlyPercent = usagePercent(wallet.creditsUsed, wallet.creditsLimit)
-    val dailyPercent = usagePercent(wallet.creditsUsedToday, wallet.creditsLimitDay)
+    val monthlyPercent = wallet.monthlyUsedPercent
+    val dailyPercent = wallet.dailyUsedPercent
 
     Text(
         text = "Usage",
@@ -332,6 +334,12 @@ private fun UsageAllowanceSection(wallet: WalletSnapshot) {
             modifier = Modifier.weight(1f)
         )
     }
+    Text(
+        text = "Monthly remaining: ${wallet.monthlyRemainingPercent}% · Daily remaining: ${wallet.dailyRemainingPercent}%",
+        fontSize = 12.sp,
+        color = AccountMuted,
+        modifier = Modifier.padding(top = 8.dp)
+    )
     if (wallet.freeOnlyMode) {
         Spacer(modifier = Modifier.height(10.dp))
         Text(
@@ -520,12 +528,12 @@ private data class PlanBannerStyle(
 )
 
 @Composable
-fun AccountMenuRow(item: AccountMenuItem) {
+fun AccountMenuRow(item: AccountMenuItem, onClick: () -> Unit = {}) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = 72.dp)
-            .clickable { }
+            .clickable(onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 18.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

@@ -12,6 +12,10 @@ data class WalletSnapshot(
     val creditsLimit12h: Long = 2_500,
     val freeOnlyMode: Boolean = false,
     val tier: String = "free",
+    val monthlyUsedPercent: Int = 0,
+    val monthlyRemainingPercent: Int = 100,
+    val dailyUsedPercent: Int = 0,
+    val dailyRemainingPercent: Int = 100,
 ) {
     companion object {
         fun fromJson(obj: JSONObject): WalletSnapshot = WalletSnapshot(
@@ -24,6 +28,10 @@ data class WalletSnapshot(
             creditsLimit12h = obj.optLong("credits_limit_12h", 2_500),
             freeOnlyMode = obj.optBoolean("free_only_mode", false),
             tier = obj.optString("tier", "free"),
+            monthlyUsedPercent = obj.optInt("monthly_used_percent", 0),
+            monthlyRemainingPercent = obj.optInt("monthly_remaining_percent", 100),
+            dailyUsedPercent = obj.optInt("daily_used_percent", 0),
+            dailyRemainingPercent = obj.optInt("daily_remaining_percent", 100),
         )
     }
 }

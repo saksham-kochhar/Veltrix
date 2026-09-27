@@ -1,5 +1,9 @@
 package com.example.veltrix.Screen
 
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
@@ -142,7 +146,9 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
     var selectedMode by remember { mutableStateOf("Normal") }
     var selectedModelId by remember { mutableStateOf(viewmodel.selectedModelId) }
     var showChatModeSheet by remember { mutableStateOf(false) }
+    var showAttachMediaSheet by remember { mutableStateOf(false) }
     val chatModeSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val attachMediaSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val modeColor = when (selectedMode) {
         "Brainstorm" -> Color(0xFF7C4DFF)
         "Learn" -> Color(0xFFFF9800)
@@ -150,6 +156,15 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
         else -> Color(0xFFF5F5FA)
     }
     val context = LocalContext.current
+    var attachedMediaUri by remember { mutableStateOf<Uri?>(null) }
+    val mediaPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        attachedMediaUri = uri
+        if (uri != null) {
+            Toast.makeText(context, "Media attached", Toast.LENGTH_SHORT).show()
+        }
+    }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val userProfile by viewmodel.userProfile.collectAsState()
@@ -223,7 +238,7 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
             }
             val modelLogoRes = selectedProvider?.let { ProviderLogos.resFor(it.id) }
             val headerProviders = if (viewmodel.OnlineMode) {
-                AiModels.providers
+                viewmodel.onlineProviders ?: AiModels.providers
             } else {
                 listOf(AiModels.offlineProvider)
             }
@@ -234,6 +249,11 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
             } else {
                 AiModels.offline.id
             }
+            val canAttachMedia = viewmodel.OnlineMode &&
+                AiModels.supportsImageInput(
+                    selectedModelId,
+                    viewmodel.onlineModelImageInputSupport
+                )
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -353,15 +373,6 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
                     .border(1.5.dp, composerBorder, RoundedCornerShape(28.dp))
                     .padding(horizontal = 14.dp, vertical = 14.dp)
             ) {
-                if (viewmodel.OnlineMode) {
-                    val w = viewmodel.walletSnapshot
-                    Text(
-                        text = "Credits: ${w.creditsUsed} / ${w.creditsLimit}",
-                        fontSize = 12.sp,
-                        color = Color(0xFF6B6B7A),
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
                 BasicTextField(
                     value = question,
                     onValueChange = { question = it },
@@ -390,7 +401,16 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
                     }
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                attachedMediaUri?.let {
+                    Text(
+                        text = "Media attached",
+                        fontSize = 12.sp,
+                        color = Color(0xFF6B6B7A),
+                        modifier = Modifier.padding(bottom = 10.dp)
+                    )
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -401,22 +421,24 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(composerControlBg)
-                                .clickable {
-                                    // add media
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Add,
-                                contentDescription = "Add",
-                                tint = Color(0xFF1C1C3A),
-                                modifier = Modifier.size(22.dp)
-                            )
+                        if (canAttachMedia) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(composerControlBg)
+                                    .clickable {
+                                        showAttachMediaSheet = true
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Add,
+                                    contentDescription = "Attach media",
+                                    tint = Color(0xFF1C1C3A),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
                         }
 
                         ComposerModeChip(
@@ -492,9 +514,67 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
                 )
             }
 
+            if (showAttachMediaSheet) {
+                AttachMediaBottomSheet(
+                    sheetState = attachMediaSheetState,
+                    onDismiss = { showAttachMediaSheet = false },
+                    onAttachMedia = {
+                        showAttachMediaSheet = false
+                        mediaPickerLauncher.launch("image/*")
+                    }
+                )
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AttachMediaBottomSheet(
+    sheetState: SheetState,
+    onDismiss: () -> Unit,
+    onAttachMedia: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color.White,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 18.dp)
+        ) {
+            Text(
+                text = "Add media",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF111133)
+            )
+            Spacer(modifier = Modifier.height(14.dp))
+            Button(
+                onClick = onAttachMedia,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF5B4DFF),
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(18.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Attach media")
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+        }
     }
 }
 

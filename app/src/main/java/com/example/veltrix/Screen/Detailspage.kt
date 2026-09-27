@@ -14,6 +14,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Star
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -26,11 +39,14 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -48,11 +64,12 @@ import com.example.veltrix.veltrixviewmodel
 
 
 @Composable
-fun PlanSelectionScreen(viewmodel: veltrixviewmodel, navController: NavHostController) {
+fun LegacyPlanSelectionScreen(viewmodel: veltrixviewmodel, navController: NavHostController) {
 
     val primaryBlue = Color(0xFF5A4CFF)
     // Names pre-filled by Google at composition time → lock them
     val namesFromGoogle = remember { viewmodel.firstname.isNotBlank() && viewmodel.lastname.isNotBlank() }
+    var selectedPlan = remember { androidx.compose.runtime.mutableStateOf("free") }
     val fieldColors = TextFieldDefaults.colors(
         focusedTextColor = Color(0xFF1A1A2E),
         unfocusedTextColor = Color(0xFF1A1A2E),
@@ -204,10 +221,27 @@ fun PlanSelectionScreen(viewmodel: veltrixviewmodel, navController: NavHostContr
 
             Spacer(Modifier.height(30.dp))
 
+            Text("Choose your plan", fontWeight = FontWeight.SemiBold, color = Color(0xFF13144A))
+            listOf(
+                "free" to "Free",
+                "pro" to "Pro",
+                "pro_plus" to "Pro Plus",
+                "plus" to "Plus",
+                "ultra" to "Ultra"
+            ).forEach { (id, label) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = selectedPlan.value == id,
+                        onClick = { selectedPlan.value = id }
+                    )
+                    Text(label, color = Color(0xFF33334D))
+                }
+            }
+
             // ── Continue Button ───────────────────────────────
             Button(
                 onClick = {
-                    viewmodel.completeOnboarding("free") {
+                    viewmodel.completeOnboarding(selectedPlan.value) {
                         navController.navigate(Routes.Home) {
                             popUpTo(0) { inclusive = true }
                         }
@@ -231,6 +265,225 @@ fun PlanSelectionScreen(viewmodel: veltrixviewmodel, navController: NavHostContr
             }
 
             Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+private data class PlanCard(
+    val id: String,
+    val name: String,
+    val price: String,
+    val subtitle: String,
+    val description: String,
+    val features: List<Pair<String, String>>,
+    val accent: Color,
+    val surface: Color,
+    val popular: Boolean = false
+)
+
+private val planCards = listOf(
+    PlanCard(
+        "free", "Free", "₹0", "A simple way to get started",
+        "Explore Veltrix with essential AI access.",
+        listOf(
+            "75,000 tokens" to "A monthly allowance for everyday chats.",
+            "Free models" to "Access the free model collection.",
+            "Great for getting started" to "Learn, brainstorm and explore."
+        ), Color(0xFF3478F6), Color(0xFFF4F8FF)
+    ),
+    PlanCard(
+        "pro", "Pro", "₹299", "More room for focused work",
+        "A balanced plan for regular AI use.",
+        listOf(
+            "More conversations" to "A larger allowance than Free.",
+            "Popular models" to "Access a curated set of capable models.",
+            "Built for productivity" to "Study, code and work with confidence."
+        ), Color(0xFF5B4DFF), Color(0xFFF7F5FF)
+    ),
+    PlanCard(
+        "pro_plus", "Pro Plus", "₹499", "More power for productivity",
+        "Longer conversations with more advanced models.",
+        listOf(
+            "Higher allowance than Pro" to "Keep complex conversations going.",
+            "More advanced models" to "Unlock the next level of the catalog.",
+            "Ideal for serious work" to "Coding, research and daily projects."
+        ), Color(0xFF5B4DFF), Color(0xFFF7F3FF), popular = true
+    ),
+    PlanCard(
+        "plus", "Plus", "₹799", "For ambitious ideas",
+        "More access for creators and demanding workflows.",
+        listOf(
+            "A larger monthly allowance" to "Use more capable models for longer.",
+            "Expanded model access" to "Explore more of the Veltrix catalog.",
+            "Made for heavy usage" to "Handle deeper tasks and longer sessions."
+        ), Color(0xFF00A879), Color(0xFFF1FCF8)
+    ),
+    PlanCard(
+        "ultra", "Ultra", "₹999", "The complete Veltrix experience",
+        "Maximum access for your most demanding work.",
+        listOf(
+            "Largest monthly allowance" to "Stay productive across long sessions.",
+            "All available models" to "Unlock the complete model catalog.",
+            "For power users" to "Take on advanced work without compromise."
+        ), Color(0xFFB46A00), Color(0xFFFFF9ED)
+    )
+)
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun PlanSelectionScreen(viewmodel: veltrixviewmodel, navController: NavHostController) {
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = 2)
+    val flingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
+    val selectedIndex by remember {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
+            layoutInfo.visibleItemsInfo
+                .minByOrNull { item -> kotlin.math.abs(item.offset + item.size / 2 - viewportCenter) }
+                ?.index
+                ?.coerceIn(0, planCards.lastIndex)
+                ?: listState.firstVisibleItemIndex.coerceIn(0, planCards.lastIndex)
+        }
+    }
+    val selectedPlan = planCards[selectedIndex]
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFFCFCFF))
+            .verticalScroll(rememberScrollState())
+            .padding(top = 22.dp, bottom = 28.dp)
+    ) {
+        Text(
+            text = "‹",
+            fontSize = 42.sp,
+            color = Color(0xFF151542),
+            modifier = Modifier.padding(horizontal = 24.dp)
+        )
+        Text(
+            text = "Choose a Plan",
+            fontSize = 32.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF13144A),
+            modifier = Modifier.padding(start = 28.dp, end = 28.dp, top = 12.dp)
+        )
+        Text(
+            text = "Get more access to advanced AI models\nfor better conversations.",
+            fontSize = 17.sp,
+            lineHeight = 25.sp,
+            color = Color(0xFF85859B),
+            modifier = Modifier.padding(start = 28.dp, end = 28.dp, top = 8.dp)
+        )
+        Spacer(Modifier.height(26.dp))
+
+        LazyRow(
+            state = listState,
+            flingBehavior = flingBehavior,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 28.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            itemsIndexed(planCards) { index, plan ->
+                val distance = kotlin.math.abs(index - selectedIndex).toFloat()
+                val scale by animateFloatAsState(
+                    targetValue = if (distance == 0f) 1f else 0.93f,
+                    animationSpec = tween(280),
+                    label = "planScale"
+                )
+                PlanCardView(
+                    plan = plan,
+                    scale = scale,
+                    selected = index == selectedIndex,
+                    onClick = { /* snapping keeps selection centered */ }
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Button(
+            onClick = {
+                viewmodel.completeOnboarding(selectedPlan.id) {
+                    navController.navigate(Routes.Home) { popUpTo(0) { inclusive = true } }
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 28.dp)
+                .height(58.dp),
+            shape = RoundedCornerShape(20.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = selectedPlan.accent)
+        ) {
+            Text("Get ${selectedPlan.name}", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        }
+        Text(
+            text = "You can change your plan later.",
+            color = Color(0xFF9A9AAF),
+            fontSize = 12.sp,
+            modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 10.dp)
+        )
+    }
+}
+
+@Composable
+private fun PlanCardView(
+    plan: PlanCard,
+    scale: Float,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .width(326.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(30.dp),
+        color = plan.surface,
+        border = BorderStroke(if (selected) 2.dp else 1.dp, plan.accent.copy(alpha = if (selected) 0.9f else 0.18f)),
+        shadowElevation = if (selected) 16.dp else 5.dp
+    ) {
+        Column(Modifier.padding(25.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Surface(color = plan.accent.copy(alpha = 0.12f), shape = RoundedCornerShape(18.dp)) {
+                    Icon(
+                        imageVector = when (plan.id) {
+                            "ultra" -> Icons.Outlined.Bolt
+                            "free" -> Icons.Outlined.AutoAwesome
+                            else -> Icons.Outlined.Star
+                        },
+                        contentDescription = null,
+                        tint = plan.accent,
+                        modifier = Modifier.padding(16.dp).size(28.dp)
+                    )
+                }
+                if (plan.popular) {
+                    Surface(color = plan.accent.copy(alpha = 0.12f), shape = RoundedCornerShape(20.dp)) {
+                        Text("Most Popular", color = plan.accent, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
+                    }
+                }
+            }
+            Spacer(Modifier.height(22.dp))
+            Text(plan.name, fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Color(0xFF12133E))
+            Text(plan.subtitle, fontSize = 16.sp, color = Color(0xFF77778E), modifier = Modifier.padding(top = 4.dp))
+            Spacer(Modifier.height(18.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(plan.price, fontSize = 36.sp, fontWeight = FontWeight.Bold, color = Color(0xFF12133E))
+                Text(" / month", fontSize = 15.sp, color = Color(0xFF88889C), modifier = Modifier.padding(bottom = 6.dp, start = 5.dp))
+            }
+            Text(plan.description, fontSize = 14.sp, color = Color(0xFF87879A), modifier = Modifier.padding(top = 7.dp))
+            Spacer(Modifier.height(18.dp))
+            androidx.compose.material3.Divider(color = plan.accent.copy(alpha = 0.14f))
+            Spacer(Modifier.height(14.dp))
+            plan.features.forEach { (title, detail) ->
+                Row(Modifier.padding(vertical = 9.dp), verticalAlignment = Alignment.Top) {
+                    Surface(color = plan.accent.copy(alpha = 0.12f), shape = RoundedCornerShape(50)) {
+                        Icon(Icons.Outlined.Check, null, tint = plan.accent, modifier = Modifier.padding(6.dp).size(16.dp))
+                    }
+                    Column(Modifier.padding(start = 12.dp)) {
+                        Text(title, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color(0xFF161744))
+                        Text(detail, fontSize = 13.sp, lineHeight = 18.sp, color = Color(0xFF85859B), modifier = Modifier.padding(top = 2.dp))
+                    }
+                }
+            }
         }
     }
 }
