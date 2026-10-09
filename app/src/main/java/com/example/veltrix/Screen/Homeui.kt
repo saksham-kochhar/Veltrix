@@ -37,6 +37,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -214,6 +216,8 @@ fun ChatbotScreen(viewmodel : veltrixviewmodel , navController: NavHostControlle
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 20.dp)
+                .navigationBarsPadding()
+                .imePadding()
         ) {
             Spacer(modifier = Modifier.height(40.dp))
 

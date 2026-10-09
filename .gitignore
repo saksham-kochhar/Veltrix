@@ -17,7 +17,23 @@ local.properties
 # Cursor IDE (rules, local extracts, etc.)
 .cursor/
 
-# Local backend copy and graphify knowledge graph output
+# Secrets (never commit)
+.env
+.env.local
+serviceAccount.json
+**/serviceAccount.json
+
+# Local backend (deploy via Render, separate repo copy)
 Backend/
 backend/
+
+# Tooling / IDE outputs
 graphify-out/
+
+# Android build artifacts
+app/build/
+**/*.apk
+**/*.aab
+
+# Stray editor files
+**/Untitled

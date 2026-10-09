@@ -42,8 +42,25 @@ import com.example.veltrix.chathistorry.shouldCompact
 import com.example.veltrix.chathistorry.shouldRefreshProfile
 import com.example.veltrix.chathistorry.toSummary
 import com.example.veltrix.chathistorry.unsummarizedTail
+import com.example.veltrix.security.DeviceSession
+import com.example.veltrix.security.LinkedAuthProvider
+import com.example.veltrix.security.LoginEvent
+import com.example.veltrix.security.SecurityEvent
+import com.example.veltrix.security.SecurityRepository
+import com.example.veltrix.notifications.AppForegroundHolder
+import com.example.veltrix.notifications.LocalNotificationHelper
+import com.example.veltrix.notifications.NotificationPrefsCache
+import com.example.veltrix.notifications.NotificationPreferencesRepository
+import com.example.veltrix.notifications.PushTokenRegistrar
+import com.example.veltrix.security.SessionStore
+import com.google.firebase.auth.AuthCredential
+import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthException
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
+import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FieldValue
+import com.google.firebase.Timestamp
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -55,8 +72,60 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
+import org.json.JSONObject
 
 class veltrixviewmodel : ViewModel(){
+    private var profileStorageContext: Context? = null
+    private val profilePrefsName = "veltrix_profile_cache"
+
+    fun attachProfileStorage(context: Context) {
+        profileStorageContext = context.applicationContext
+        auth.currentUser?.let { loadOrCreateUserProfile(it.uid, it.email.orEmpty()) }
+    }
+
+    private fun cacheProfile(profile: UserProfile, uid: String) {
+        val context = profileStorageContext ?: return
+        val json = JSONObject().apply {
+            put("email", profile.email)
+            put("firstname", profile.firstname)
+            put("lastname", profile.lastname)
+            put("phoneNumber", profile.phoneNumber)
+            put("gender", profile.gender)
+            put("age", profile.age)
+            put("plan", profile.plan)
+            put("onboardcomplete", profile.onboardcomplete)
+            put("selectedplan", profile.selectedplan)
+            put("profileSummary", profile.profileSummary)
+            put("summarizedChatCount", profile.summarizedChatCount)
+            profile.planExpiresAt?.let { put("planExpiresAt", it.toDate().time) }
+        }
+        context.getSharedPreferences(profilePrefsName, Context.MODE_PRIVATE)
+            .edit().putString(uid, json.toString()).apply()
+    }
+
+    private fun readCachedProfile(uid: String, email: String): UserProfile? {
+        val context = profileStorageContext ?: return null
+        val raw = context.getSharedPreferences(profilePrefsName, Context.MODE_PRIVATE)
+            .getString(uid, null) ?: return null
+        return runCatching {
+            val json = JSONObject(raw)
+            UserProfile(
+                email = email.ifBlank { json.optString("email") },
+                firstname = json.optString("firstname"), lastname = json.optString("lastname"),
+                phoneNumber = json.optString("phoneNumber"), gender = json.optString("gender"),
+                age = json.optInt("age"), plan = json.optString("plan"),
+                onboardcomplete = json.optBoolean("onboardcomplete"),
+                selectedplan = json.optString("selectedplan"),
+                profileSummary = json.optString("profileSummary"),
+                summarizedChatCount = json.optInt("summarizedChatCount"),
+                planExpiresAt = if (json.has("planExpiresAt")) Timestamp(java.util.Date(json.getLong("planExpiresAt"))) else null
+            )
+        }.getOrNull()
+    }
+    data class OfflineModelFile(val name: String, val sizeBytes: Long, val path: String)
+
+    var offlineModelFiles by mutableStateOf<List<OfflineModelFile>>(emptyList())
+        private set
     var firstname by mutableStateOf("")
     var lastname by mutableStateOf("")
 
@@ -113,6 +182,11 @@ class veltrixviewmodel : ViewModel(){
     val sessionSummaries = mutableStateListOf<ChatSessionSummary>()
 
     var historyStatusMessage by mutableStateOf<String?>(null)
+
+    var pendingNotificationRoute by mutableStateOf<String?>(null)
+        private set
+    var pendingNotificationSessionId by mutableStateOf<String?>(null)
+        private set
 
     private var historyAppContext: Context? = null
     private var chatHistoryInitialized = false
@@ -772,6 +846,7 @@ class veltrixviewmodel : ViewModel(){
                     connection.requestMethod = "POST"
                     connection.setRequestProperty("Content-Type", "application/json")
                     connection.setRequestProperty("Authorization", "Bearer $idToken")
+                    connection.setRequestProperty("X-App-State", AppForegroundHolder.appStateHeader())
                     connection.doOutput = true
                     connection.outputStream.write(requestBody.toByteArray())
 
@@ -814,6 +889,247 @@ class veltrixviewmodel : ViewModel(){
 
     //Authentication
 
+    private val securityRepository = SecurityRepository()
+    private var securitySessionRegistered = false
+
+    private val _deviceSessions = MutableStateFlow<List<DeviceSession>>(emptyList())
+    val deviceSessions: StateFlow<List<DeviceSession>> = _deviceSessions.asStateFlow()
+
+    private val _loginEvents = MutableStateFlow<List<LoginEvent>>(emptyList())
+    val loginEvents: StateFlow<List<LoginEvent>> = _loginEvents.asStateFlow()
+
+    private val _securityEvents = MutableStateFlow<List<SecurityEvent>>(emptyList())
+    val securityEvents: StateFlow<List<SecurityEvent>> = _securityEvents.asStateFlow()
+
+    private val _linkedProviders = MutableStateFlow<List<LinkedAuthProvider>>(emptyList())
+    val linkedProviders: StateFlow<List<LinkedAuthProvider>> = _linkedProviders.asStateFlow()
+
+    private val _hasPasswordProvider = MutableStateFlow(false)
+    val hasPasswordProvider: StateFlow<Boolean> = _hasPasswordProvider.asStateFlow()
+
+    private val _hasGoogleProvider = MutableStateFlow(false)
+    val hasGoogleProvider: StateFlow<Boolean> = _hasGoogleProvider.asStateFlow()
+
+    private val _accountEmail = MutableStateFlow<String?>(null)
+    val accountEmail: StateFlow<String?> = _accountEmail.asStateFlow()
+
+    private val _linkGoogleState = MutableStateFlow<SecurityActionState>(SecurityActionState.Idle)
+    val linkGoogleState: StateFlow<SecurityActionState> = _linkGoogleState.asStateFlow()
+
+    private var pendingGoogleLinkCredential: AuthCredential? = null
+
+    private val _changePasswordState = MutableStateFlow<SecurityActionState>(SecurityActionState.Idle)
+    val changePasswordState: StateFlow<SecurityActionState> = _changePasswordState.asStateFlow()
+
+    private val _revokeSessionState = MutableStateFlow<SecurityActionState>(SecurityActionState.Idle)
+    val revokeSessionState: StateFlow<SecurityActionState> = _revokeSessionState.asStateFlow()
+
+    private val _signOutAllState = MutableStateFlow<SecurityActionState>(SecurityActionState.Idle)
+    val signOutAllState: StateFlow<SecurityActionState> = _signOutAllState.asStateFlow()
+
+    sealed class SecurityActionState {
+        object Idle : SecurityActionState()
+        object Loading : SecurityActionState()
+        object Success : SecurityActionState()
+        data class Error(val message: String) : SecurityActionState()
+    }
+
+    fun refreshLinkedProviders() {
+        _linkedProviders.value = securityRepository.linkedProviders()
+        _hasPasswordProvider.value = securityRepository.hasPasswordProvider()
+        _hasGoogleProvider.value = securityRepository.hasGoogleProvider()
+        _accountEmail.value = securityRepository.primaryAccountEmail()
+    }
+
+    fun clearLinkGoogleState() {
+        _linkGoogleState.value = SecurityActionState.Idle
+    }
+
+    fun cancelPendingGoogleLink() {
+        pendingGoogleLinkCredential = null
+        if (_authstate.value is Authstate.LinkGoogleRequiresPassword) {
+            _authstate.value = Authstate.Unauthenticated
+        }
+    }
+
+    fun refreshSecurityFromBackend() {
+        refreshLinkedProviders()
+        viewModelScope.launch {
+            runCatching {
+                _deviceSessions.value = securityRepository.fetchSessions()
+                _loginEvents.value = securityRepository.fetchLoginEvents()
+                _securityEvents.value = securityRepository.fetchSecurityEvents()
+            }
+        }
+    }
+
+    /** Loads security lists from Render backend (not Firestore client SDK). */
+    fun startSecurityListeners() {
+        refreshSecurityFromBackend()
+    }
+
+    private fun resolveAuthMethod(): String {
+        val user = auth.currentUser ?: return "password"
+        return if (user.providerData.any { it.providerId == GoogleAuthProvider.PROVIDER_ID }) {
+            "google"
+        } else {
+            "password"
+        }
+    }
+
+    fun clearSecurityActionState() {
+        _signOutAllState.value = SecurityActionState.Idle
+    }
+
+    fun clearChangePasswordState() {
+        _changePasswordState.value = SecurityActionState.Idle
+    }
+
+    fun registerSecuritySessionIfNeeded(context: Context) {
+        if (securitySessionRegistered) return
+        viewModelScope.launch {
+            runCatching {
+                securityRepository.registerSessionAfterLogin(
+                    context.applicationContext,
+                    resolveAuthMethod()
+                )
+                securitySessionRegistered = true
+            }
+        }
+    }
+
+    fun touchSecuritySession(context: Context) {
+        viewModelScope.launch {
+            runCatching { securityRepository.touchSessionActivity(context.applicationContext) }
+        }
+    }
+
+    suspend fun isCurrentSessionRevoked(context: Context): Boolean =
+        securityRepository.isCurrentSessionRevoked(context.applicationContext)
+
+    fun requestPasswordReset(email: String, onResult: (Result<Unit>) -> Unit) {
+        viewModelScope.launch {
+            val result = runCatching {
+                auth.sendPasswordResetEmail(email.trim()).await()
+            }.map { }
+            onResult(result)
+        }
+    }
+
+    fun changePassword(
+        context: Context,
+        currentPassword: String,
+        newPassword: String,
+        confirmPassword: String,
+        signOutOthers: Boolean
+    ) {
+        val user = auth.currentUser
+        val userEmail = user?.email
+        if (user == null || userEmail.isNullOrBlank()) {
+            _changePasswordState.value = SecurityActionState.Error("Not signed in.")
+            return
+        }
+        if (newPassword.length < 8) {
+            _changePasswordState.value = SecurityActionState.Error("Password must be at least 8 characters.")
+            return
+        }
+        if (newPassword != confirmPassword) {
+            _changePasswordState.value = SecurityActionState.Error("New passwords do not match.")
+            return
+        }
+        _changePasswordState.value = SecurityActionState.Loading
+        val credential = EmailAuthProvider.getCredential(userEmail, currentPassword)
+        user.reauthenticate(credential).addOnSuccessListener {
+            user.updatePassword(newPassword).addOnSuccessListener {
+                viewModelScope.launch {
+                    runCatching {
+                        securityRepository.logSecurityEvent(
+                            "PASSWORD_CHANGED",
+                            "Your Veltrix password was changed.",
+                            forceRefreshToken = true,
+                        )
+                    }.onFailure {
+                        Log.w(
+                            "VeltrixSecurity",
+                            "Password changed but security event log failed",
+                            it
+                        )
+                    }
+                    if (signOutOthers) {
+                        runCatching {
+                            val sessionId =
+                                SessionStore.getOrCreateSessionId(context.applicationContext)
+                            securityRepository.signOutAllDevices(
+                                sessionId,
+                                forceRefreshToken = true,
+                            )
+                            user.reauthenticate(
+                                EmailAuthProvider.getCredential(userEmail, newPassword)
+                            ).await()
+                        }.onFailure {
+                            _changePasswordState.value = SecurityActionState.Error(
+                                it.message ?: "Password updated but sign-out failed."
+                            )
+                            return@launch
+                        }
+                    }
+                    _changePasswordState.value = SecurityActionState.Success
+                }
+            }.addOnFailureListener {
+                _changePasswordState.value = SecurityActionState.Error(
+                    it.message ?: "Could not update password."
+                )
+            }
+        }.addOnFailureListener {
+            _changePasswordState.value = SecurityActionState.Error(
+                "Current password is incorrect."
+            )
+        }
+    }
+
+    fun revokeSession(sessionId: String) {
+        _revokeSessionState.value = SecurityActionState.Loading
+        viewModelScope.launch {
+            runCatching { securityRepository.revokeSession(sessionId) }
+                .onSuccess {
+                    _revokeSessionState.value = SecurityActionState.Success
+                    refreshSecurityFromBackend()
+                }
+                .onFailure {
+                    _revokeSessionState.value = SecurityActionState.Error(
+                        it.message ?: "Could not revoke session."
+                    )
+                }
+        }
+    }
+
+    fun signOutAllDevices(context: Context, keepCurrentDevice: Boolean) {
+        _signOutAllState.value = SecurityActionState.Loading
+        viewModelScope.launch {
+            runCatching {
+                val keepId = if (keepCurrentDevice) {
+                    SessionStore.getOrCreateSessionId(context.applicationContext)
+                } else {
+                    null
+                }
+                securityRepository.signOutAllDevices(keepId)
+            }.onSuccess {
+                _signOutAllState.value = SecurityActionState.Success
+            }.onFailure {
+                _signOutAllState.value = SecurityActionState.Error(
+                    it.message ?: "Could not sign out all devices."
+                )
+            }
+        }
+    }
+
+    private fun clearSecurityState() {
+        securitySessionRegistered = false
+        _deviceSessions.value = emptyList()
+        _loginEvents.value = emptyList()
+        _securityEvents.value = emptyList()
+    }
+
     val auth : FirebaseAuth = FirebaseAuth.getInstance()
     private val _authstate = MutableLiveData<Authstate>()
     val authstate : MutableLiveData<Authstate> = _authstate
@@ -850,6 +1166,12 @@ class veltrixviewmodel : ViewModel(){
                 }
             } else {
                 _authstate.value = Authstate.Error(task.exception?.message ?: "Something Went Wrong!")
+                viewModelScope.launch {
+                    securityRepository.logFailedLogin(
+                        email,
+                        task.exception?.message ?: "login_failed"
+                    )
+                }
             }
         }
     }
@@ -890,14 +1212,42 @@ class veltrixviewmodel : ViewModel(){
         }
     }
 
+    fun handleNotificationIntent(intent: Intent?) {
+        val route = intent?.getStringExtra(MainActivity.EXTRA_NOTIFICATION_ROUTE) ?: return
+        pendingNotificationRoute = route
+        pendingNotificationSessionId = intent.getStringExtra(MainActivity.EXTRA_SESSION_ID)
+    }
+
+    fun consumePendingNotificationRoute(): Pair<String?, String?> {
+        val route = pendingNotificationRoute
+        val session = pendingNotificationSessionId
+        pendingNotificationRoute = null
+        pendingNotificationSessionId = null
+        return route to session
+    }
+
+    fun registerPushIfNeeded(context: Context) {
+        viewModelScope.launch {
+            runCatching {
+                val prefs = NotificationPreferencesRepository().fetchPreferences()
+                NotificationPrefsCache.update(prefs)
+                PushTokenRegistrar.registerCurrentToken(context.applicationContext)
+            }
+        }
+    }
+
     fun signout() {
         val ctx = historyAppContext
         viewModelScope.launch {
+            ctx?.let {
+                runCatching { PushTokenRegistrar.unregisterStoredToken(it.applicationContext) }
+            }
             if (ctx != null && messagelist.isNotEmpty()) {
                 finalizeAndPersistSession(ctx)
             }
             auth.signOut()
             clearChatHistoryState()
+            clearSecurityState()
             _userProfile.value = null
             _authstate.value = Authstate.Unauthenticated
         }
@@ -910,22 +1260,131 @@ class veltrixviewmodel : ViewModel(){
         _authstate.value = Authstate.Error(message)
     }
 
+    fun handleGoogleIdToken(idToken: String, mode: GoogleSignInMode) {
+        when (mode) {
+            GoogleSignInMode.SignIn -> signInWithGoogle(idToken)
+            GoogleSignInMode.LinkToCurrentAccount -> linkGoogleToCurrentAccount(idToken)
+        }
+    }
+
     fun signInWithGoogle(idToken: String) {
         _authstate.value = Authstate.Loading
-        val credential = com.google.firebase.auth.GoogleAuthProvider.getCredential(idToken, null)
+        val credential = GoogleAuthProvider.getCredential(idToken, null)
         auth.signInWithCredential(credential).addOnCompleteListener { task ->
             if (task.isSuccessful) {
-                val user = auth.currentUser ?: return@addOnCompleteListener
-                email = user.email ?: ""
-                // Pre-fill name from Google profile so the onboarding fields aren't blank
-                val nameParts = user.displayName?.trim()?.split(" ") ?: emptyList()
-                if (nameParts.isNotEmpty() && firstname.isBlank()) firstname = nameParts.first()
-                if (nameParts.size > 1 && lastname.isBlank()) lastname = nameParts.drop(1).joinToString(" ")
-                loadOrCreateUserProfile(user.uid, email)
-            } else {
-                _authstate.value = Authstate.Error(
-                    task.exception?.message ?: "Google sign-in failed"
+                onGoogleSignInSuccess()
+                return@addOnCompleteListener
+            }
+            val collisionEmail = resolveGoogleCollisionEmail(task.exception)
+            if (collisionEmail != null) {
+                pendingGoogleLinkCredential = credential
+                email = collisionEmail
+                _authstate.value = Authstate.LinkGoogleRequiresPassword(collisionEmail)
+                return@addOnCompleteListener
+            }
+            _authstate.value = Authstate.Error(
+                task.exception?.message ?: "Google sign-in failed"
+            )
+        }
+    }
+
+    fun completeGoogleLinkAtSignIn(password: String) {
+        val linkCredential = pendingGoogleLinkCredential
+        val linkEmail = (_authstate.value as? Authstate.LinkGoogleRequiresPassword)?.email
+            ?: email.takeIf { it.isNotBlank() }
+        if (linkCredential == null || linkEmail.isNullOrBlank()) {
+            _authstate.value = Authstate.Error("Link session expired. Try Google sign-in again.")
+            return
+        }
+        if (password.isBlank()) {
+            _authstate.value = Authstate.Error("Enter your Veltrix password to link Google.")
+            return
+        }
+        _authstate.value = Authstate.Loading
+        auth.signInWithEmailAndPassword(linkEmail, password).addOnCompleteListener { signInTask ->
+            if (!signInTask.isSuccessful) {
+                _authstate.value = Authstate.LinkGoogleRequiresPassword(
+                    linkEmail,
+                    "Incorrect password. Use the password for your email account."
                 )
+                return@addOnCompleteListener
+            }
+            val user = auth.currentUser
+            if (user == null) {
+                _authstate.value = Authstate.Error("Sign-in failed. Try again.")
+                return@addOnCompleteListener
+            }
+            user.linkWithCredential(linkCredential).addOnCompleteListener { linkTask ->
+                if (!linkTask.isSuccessful) {
+                    _authstate.value = Authstate.Error(
+                        linkTask.exception?.message ?: "Could not link Google to this account."
+                    )
+                    return@addOnCompleteListener
+                }
+                pendingGoogleLinkCredential = null
+                logGoogleLinkedBestEffort()
+                onGoogleSignInSuccess()
+            }
+        }
+    }
+
+    fun linkGoogleToCurrentAccount(idToken: String) {
+        val user = auth.currentUser
+        if (user == null) {
+            _linkGoogleState.value = SecurityActionState.Error("Not signed in.")
+            return
+        }
+        if (securityRepository.hasGoogleProvider()) {
+            _linkGoogleState.value = SecurityActionState.Error("Google is already linked.")
+            return
+        }
+        _linkGoogleState.value = SecurityActionState.Loading
+        val googleCredential = GoogleAuthProvider.getCredential(idToken, null)
+        user.linkWithCredential(googleCredential).addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                refreshLinkedProviders()
+                logGoogleLinkedBestEffort()
+                _linkGoogleState.value = SecurityActionState.Success
+                return@addOnCompleteListener
+            }
+            val message = when ((task.exception as? FirebaseAuthException)?.errorCode) {
+                "ERROR_CREDENTIAL_ALREADY_IN_USE" ->
+                    "This Google account is linked to another Veltrix user. Sign in with that account or use a different Google account."
+                "ERROR_EMAIL_ALREADY_IN_USE" ->
+                    "This Google email is already used by another Veltrix account."
+                "ERROR_REQUIRES_RECENT_LOGIN" ->
+                    "For security, change your password first, then try linking Google again."
+                else -> task.exception?.message ?: "Could not link Google account."
+            }
+            _linkGoogleState.value = SecurityActionState.Error(message)
+        }
+    }
+
+    private fun onGoogleSignInSuccess() {
+        val user = auth.currentUser ?: return
+        email = user.email ?: ""
+        val nameParts = user.displayName?.trim()?.split(" ") ?: emptyList()
+        if (nameParts.isNotEmpty() && firstname.isBlank()) firstname = nameParts.first()
+        if (nameParts.size > 1 && lastname.isBlank()) lastname = nameParts.drop(1).joinToString(" ")
+        loadOrCreateUserProfile(user.uid, email)
+    }
+
+    private fun resolveGoogleCollisionEmail(error: Exception?): String? {
+        if (error is FirebaseAuthUserCollisionException) {
+            return error.email?.takeIf { it.isNotBlank() }
+        }
+        return null
+    }
+
+    private fun logGoogleLinkedBestEffort() {
+        viewModelScope.launch {
+            runCatching {
+                securityRepository.logSecurityEvent(
+                    "GOOGLE_LINKED",
+                    "A Google account was linked to your Veltrix account."
+                )
+            }.onFailure {
+                Log.w("VeltrixSecurity", "GOOGLE_LINKED event log failed", it)
             }
         }
     }
@@ -934,6 +1393,12 @@ class veltrixviewmodel : ViewModel(){
         val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
         val userRef = db.collection("users").document(uid)
 
+        readCachedProfile(uid, email)?.let { cached ->
+            _userProfile.value = cached
+            firstname = cached.firstname
+            lastname = cached.lastname
+        }
+
         userRef.get().addOnSuccessListener { document ->
             if (document.exists()) {
                 // Email is owned by Firebase Authentication, not the editable
@@ -941,28 +1406,52 @@ class veltrixviewmodel : ViewModel(){
                 val profile = document.toObject(UserProfile::class.java)
                     ?.copy(email = auth.currentUser?.email ?: email)
                 _userProfile.value = profile
+                profile?.let { loaded ->
+                    firstname = loaded.firstname
+                    lastname = loaded.lastname
+                    cacheProfile(loaded, uid)
+                }
                 profileSummary = profile?.profileSummary.orEmpty()
                 summarizedChatCount = profile?.summarizedChatCount ?: 0
                 fetchWallet()
                 _authstate.value = if (profile?.onboardcomplete == true)
                     Authstate.Authenticated else Authstate.ProfileIncomplete
+                refreshLinkedProviders()
+                startSecurityListeners()
+                historyAppContext?.let { registerSecuritySessionIfNeeded(it) }
+                historyAppContext?.let { registerPushIfNeeded(it) }
             } else {
+                val cached = readCachedProfile(uid, email)
+                if (cached != null) {
+                    _userProfile.value = cached
+                    firstname = cached.firstname
+                    lastname = cached.lastname
+                    _authstate.value = if (cached.onboardcomplete) Authstate.Authenticated else Authstate.ProfileIncomplete
+                    return@addOnSuccessListener
+                }
                 val newProfile = UserProfile(email = email, firstname = firstname, lastname = lastname)
                 userRef.set(newProfile)
                     .addOnSuccessListener {
                         _userProfile.value = newProfile
+                        cacheProfile(newProfile, uid)
                         profileSummary = ""
                         summarizedChatCount = 0
                         _authstate.value = Authstate.ProfileIncomplete
+                        refreshLinkedProviders()
+                        startSecurityListeners()
+                        historyAppContext?.let { registerSecuritySessionIfNeeded(it) }
+                        historyAppContext?.let { registerPushIfNeeded(it) }
                     }
                     .addOnFailureListener {
-                        _userProfile.value = null
-                        _authstate.value = Authstate.Error("Failed to load profile")
+                        if (_userProfile.value == null) {
+                            _authstate.value = Authstate.Error("Failed to load profile")
+                        }
                     }
             }
         }.addOnFailureListener {
-            _userProfile.value = null
-            _authstate.value = Authstate.Error("Failed to load profile")
+            if (_userProfile.value == null) {
+                _authstate.value = Authstate.Error("Failed to load profile")
+            }
         }
     }
 
@@ -981,6 +1470,7 @@ class veltrixviewmodel : ViewModel(){
                     firstname = firstname, lastname = lastname,
                     plan = plan, onboardcomplete = true
                 )
+                _userProfile.value?.let { cacheProfile(it, uid) }
                 _authstate.value = Authstate.Authenticated
                 onDone()
             }
@@ -1013,6 +1503,7 @@ class veltrixviewmodel : ViewModel(){
                     firstname = first, lastname = last,
                     phoneNumber = phoneNumber, gender = gender, age = age
                 )
+                _userProfile.value?.let { cacheProfile(it, uid) }
                 onDone()
             }
     }
@@ -1055,6 +1546,7 @@ class veltrixviewmodel : ViewModel(){
     //Offline Model
 
     fun refreshModelStatus(context: Context) {
+        refreshOfflineModelFiles(context)
         val file = File(context.filesDir, "Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task")
 
         val isValid = file.exists() && file.length() > 1_400_000_000L
@@ -1068,6 +1560,25 @@ class veltrixviewmodel : ViewModel(){
         if (isValid && llmInference == null) {
             loadLocalModel(context)
         }
+    }
+
+    fun refreshOfflineModelFiles(context: Context) {
+        offlineModelFiles = context.filesDir.listFiles()
+            ?.filter { it.isFile && it.extension.equals("task", ignoreCase = true) && it.length() > 0L }
+            ?.sortedBy { it.name.lowercase() }
+            ?.map { OfflineModelFile(it.name, it.length(), it.absolutePath) }
+            .orEmpty()
+    }
+
+    fun deleteOfflineModel(context: Context, model: OfflineModelFile): Boolean {
+        if (model.name == "Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task") {
+            runCatching { llmInference?.close() }
+            llmInference = null
+            isModelDownloaded = false
+        }
+        val deleted = File(model.path).delete()
+        refreshOfflineModelFiles(context)
+        return deleted
     }
 
     fun downloadModel(context: Context) {
@@ -1093,6 +1604,7 @@ class veltrixviewmodel : ViewModel(){
                     withContext(Dispatchers.Main) {
                         isDownloading = false
                         isModelDownloaded = true
+                        LocalNotificationHelper.showOfflineDownload(context, success = true)
                     }
                     loadLocalModel(context)
 
@@ -1103,6 +1615,7 @@ class veltrixviewmodel : ViewModel(){
                         downloadProgress = 0f
                         isModelDownloaded = false
                         messagelist.add(Response("Download failed: ${e.message}", "Model"))
+                        LocalNotificationHelper.showOfflineDownload(context, success = false)
                     }
                 }
             }
@@ -1184,6 +1697,11 @@ class veltrixviewmodel : ViewModel(){
         }
     }
 }
+enum class GoogleSignInMode {
+    SignIn,
+    LinkToCurrentAccount,
+}
+
 sealed class Authstate{
     object Authenticated : Authstate()
     object Unauthenticated : Authstate()
@@ -1192,6 +1710,10 @@ sealed class Authstate{
     object VerificationSent : Authstate()
     object EmailNotVerified : Authstate()
     object ProfileIncomplete : Authstate()
+    data class LinkGoogleRequiresPassword(
+        val email: String,
+        val inlineError: String? = null,
+    ) : Authstate()
 }
 
 data class UserProfile(
@@ -1202,6 +1724,7 @@ data class UserProfile(
     val gender: String = "",
     val age: Int = 0,
     val plan: String = "",
+    val planExpiresAt: Timestamp? = null,
     val onboardcomplete : Boolean = false,
     val selectedplan : String = "",
     val profileSummary: String = "",

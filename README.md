@@ -15,10 +15,12 @@ Veltrix is an AI-powered Android chat assistant that works online and offline â€
 | Language | Kotlin |
 | UI | Jetpack Compose |
 | Architecture | MVVM + StateFlow |
-| Auth | Firebase Auth |
+| Auth | Firebase Auth (login, signup, password reset, Google) |
 | Online AI | OpenRouter via FastAPI backend |
+| Account security | FastAPI `/v1/security/*` + Firestore via Admin SDK on Render |
+| Notifications | FastAPI `/v1/notifications/*` + FCM (data-only) from Render |
 | Offline AI | On-device ML (MediaPipe) |
-| Backend | FastAPI + Firestore |
+| Backend | FastAPI + Firestore (Admin on server) |
 
 ## Getting started
 
@@ -42,7 +44,12 @@ See [Backend/veltrix-backend-main/veltrix-backend-main/README.md](Backend/veltri
 On Render, set at least:
 
 - `OPENROUTER_API_KEY`
+- `GEMINI_API_KEY`
 - `FIREBASE_SERVICE_ACCOUNT` (or `serviceAccount.json` for local)
+- `FCM_ENABLED` (default `true`), `CHAT_PUSH_MIN_SECONDS` (default `8`)
+- `CRON_SECRET`, `ADMIN_PROMO_SECRET` (internal plan-expiry and promo jobs)
+- `EMAIL_ENABLED` (default `false`), `EMAIL_PROVIDER`, `EMAIL_FROM` â€” see [docs/EMAIL_SETUP.md](docs/EMAIL_SETUP.md)
+- `RESEND_API_KEY` (when `EMAIL_PROVIDER=resend` and email is enabled)
 
 ## Environment
 
@@ -51,6 +58,9 @@ On Render, set at least:
 | `google-services.json` | Firebase config (Android) |
 | `OPENROUTER_API_KEY` | OpenRouter key on Render only |
 | `FIREBASE_SERVICE_ACCOUNT` | Backend Firebase Admin credentials |
+| `EMAIL_ENABLED` / `EMAIL_PROVIDER` / `EMAIL_FROM` | Optional security/notification email (Render) |
+| `RESEND_API_KEY` | Resend adapter when email is enabled |
+| `serviceAccount.json` | Local Firebase Admin only (gitignored) |
 
 ## Author
 

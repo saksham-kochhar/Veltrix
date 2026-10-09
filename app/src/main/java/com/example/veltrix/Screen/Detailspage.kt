@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -31,6 +34,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.outlined.Email
@@ -38,6 +42,7 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
@@ -47,6 +52,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -332,7 +338,10 @@ private val planCards = listOf(
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun PlanSelectionScreen(viewmodel: veltrixviewmodel, navController: NavHostController) {
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = 2)
+    val profile by viewmodel.userProfile.collectAsState()
+    val currentPlanId = profile?.plan?.lowercase()?.replace('-', '_')?.ifBlank { "free" } ?: "free"
+    val initialIndex = planCards.indexOfFirst { it.id == currentPlanId }.coerceAtLeast(0)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val flingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
     val selectedIndex by remember {
         derivedStateOf {
@@ -346,35 +355,47 @@ fun PlanSelectionScreen(viewmodel: veltrixviewmodel, navController: NavHostContr
         }
     }
     val selectedPlan = planCards[selectedIndex]
+    val currentPlan = planCards.firstOrNull { it.id == currentPlanId } ?: planCards.first()
+    val expiry = profile?.planExpiresAt?.toDate()?.let {
+        java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault()).format(it)
+    } ?: "No expiry date"
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFFFCFCFF))
             .verticalScroll(rememberScrollState())
+            .windowInsetsPadding(WindowInsets.navigationBars)
             .padding(top = 22.dp, bottom = 28.dp)
     ) {
+        IconButton(
+            onClick = { navController.popBackStack() },
+            modifier = Modifier.padding(start = 12.dp, top = 2.dp).size(44.dp)
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+                tint = Color(0xFF1C1C3A),
+                modifier = Modifier.size(22.dp)
+            )
+        }
         Text(
-            text = "‹",
-            fontSize = 42.sp,
-            color = Color(0xFF151542),
-            modifier = Modifier.padding(horizontal = 24.dp)
-        )
-        Text(
-            text = "Choose a Plan",
+            text = "Billing & Subscription",
             fontSize = 32.sp,
             fontWeight = FontWeight.Bold,
             color = Color(0xFF13144A),
-            modifier = Modifier.padding(start = 28.dp, end = 28.dp, top = 12.dp)
+            modifier = Modifier.padding(start = 28.dp, end = 28.dp, top = 10.dp)
         )
         Text(
-            text = "Get more access to advanced AI models\nfor better conversations.",
+            text = "Manage your current plan or explore more access.",
             fontSize = 17.sp,
             lineHeight = 25.sp,
             color = Color(0xFF85859B),
             modifier = Modifier.padding(start = 28.dp, end = 28.dp, top = 8.dp)
         )
         Spacer(Modifier.height(26.dp))
+
+        Text("Explore plans", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF13144A), modifier = Modifier.padding(start = 28.dp, top = 10.dp, bottom = 12.dp))
 
         LazyRow(
             state = listState,
@@ -394,6 +415,8 @@ fun PlanSelectionScreen(viewmodel: veltrixviewmodel, navController: NavHostContr
                     plan = plan,
                     scale = scale,
                     selected = index == selectedIndex,
+                    isCurrentPlan = plan.id == currentPlan.id,
+                    expiry = if (plan.id == currentPlan.id) expiry else null,
                     onClick = { /* snapping keeps selection centered */ }
                 )
             }
@@ -413,7 +436,14 @@ fun PlanSelectionScreen(viewmodel: veltrixviewmodel, navController: NavHostContr
             shape = RoundedCornerShape(20.dp),
             colors = ButtonDefaults.buttonColors(containerColor = selectedPlan.accent)
         ) {
-            Text("Get ${selectedPlan.name}", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            if (selectedPlan.id == currentPlan.id) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Current Plan", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text("Expires: $expiry", fontSize = 12.sp, fontWeight = FontWeight.Normal)
+                }
+            } else {
+                Text("Choose ${selectedPlan.name}", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            }
         }
         Text(
             text = "You can change your plan later.",
@@ -429,6 +459,8 @@ private fun PlanCardView(
     plan: PlanCard,
     scale: Float,
     selected: Boolean,
+    isCurrentPlan: Boolean,
+    expiry: String?,
     onClick: () -> Unit
 ) {
     Surface(
@@ -461,6 +493,8 @@ private fun PlanCardView(
                     }
                 }
             }
+            // Keep the card footprint stable; current-plan details are shown in the action button.
+            if (isCurrentPlan) Spacer(Modifier.height(40.dp))
             Spacer(Modifier.height(22.dp))
             Text(plan.name, fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Color(0xFF12133E))
             Text(plan.subtitle, fontSize = 16.sp, color = Color(0xFF77778E), modifier = Modifier.padding(top = 4.dp))

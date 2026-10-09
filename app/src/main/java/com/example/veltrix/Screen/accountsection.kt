@@ -29,7 +29,6 @@ import androidx.compose.material.icons.filled.Redeem
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CreditCard
-import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Security
@@ -37,8 +36,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -47,10 +44,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -78,8 +73,6 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel)
     val profile by viewmodel.userProfile.collectAsState()
     val plan = profile?.plan?.lowercase() ?: "free"
     val wallet = viewmodel.walletSnapshot
-    var accountMenuExpanded by remember { mutableStateOf(false) }
-
     LaunchedEffect(Unit) {
         viewmodel.fetchWallet()
     }
@@ -139,64 +132,19 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel)
         item {
             Spacer(modifier = Modifier.height(40.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .clickable { navcontroller.popBackStack() },
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .clickable { navcontroller.popBackStack() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = Color(0xFF1C1C3A),
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-
-                Box {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .clickable { accountMenuExpanded = true },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.MoreVert,
-                            contentDescription = "Account menu",
-                            tint = Color(0xFF1C1C3A),
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = accountMenuExpanded,
-                        onDismissRequest = { accountMenuExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Log out") },
-                            onClick = {
-                                accountMenuExpanded = false
-                                viewmodel.signout()
-                                navcontroller.navigate(Routes.Auth) {
-                                    popUpTo(0) { inclusive = true }
-                                }
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.AutoMirrored.Outlined.Logout,
-                                    contentDescription = null,
-                                    tint = Color(0xFFE53935)
-                                )
-                            }
-                        )
-                    }
-                }
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color(0xFF1C1C3A),
+                    modifier = Modifier.size(22.dp)
+                )
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -227,9 +175,7 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel)
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { }
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         ProfileAvatar(
                             firstName = profile?.firstname,
@@ -252,11 +198,6 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel)
                                 maxLines = 1
                             )
                         }
-                        Icon(
-                            Icons.Default.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = Color(0xFFC8C8D4)
-                        )
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -288,7 +229,14 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel)
                 Column {
                     menuItems.forEachIndexed { index, item ->
                         AccountMenuRow(item) {
-                            if (item.title == "Profile Information") navcontroller.navigate(Routes.profile)
+                            when (item.title) {
+                                "Profile Information" -> navcontroller.navigate(Routes.profile)
+                                "Security" -> navcontroller.navigate(Routes.security)
+                                "Notifications" -> navcontroller.navigate(Routes.notifications)
+                                "Offline Data" -> navcontroller.navigate(Routes.offlineData)
+                                "Billing & Subscription" -> navcontroller.navigate(Routes.details)
+                                "Help & Support" -> navcontroller.navigate(Routes.helpSupport)
+                            }
                         }
                         if (index != menuItems.lastIndex) {
                             HorizontalDivider(
@@ -297,6 +245,46 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: veltrixviewmodel)
                             )
                         }
                     }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+        }
+
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        viewmodel.signout()
+                        navcontroller.navigate(Routes.Auth) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Outlined.Logout,
+                        contentDescription = null,
+                        tint = Color(0xFFE53935),
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Log out",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 16.sp,
+                        color = Color(0xFFE53935)
+                    )
                 }
             }
 
@@ -338,7 +326,10 @@ private fun UsageAllowanceSection(wallet: WalletSnapshot) {
         text = "Monthly remaining: ${wallet.monthlyRemainingPercent}% · Daily remaining: ${wallet.dailyRemainingPercent}%",
         fontSize = 12.sp,
         color = AccountMuted,
-        modifier = Modifier.padding(top = 8.dp)
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
     )
     if (wallet.freeOnlyMode) {
         Spacer(modifier = Modifier.height(10.dp))

@@ -57,6 +57,7 @@ dependencies {
     //Gemini Api
     implementation("com.google.firebase:firebase-ai")
     implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-messaging")
 
     //Auth
     implementation("com.google.firebase:firebase-auth")
@@ -68,6 +69,8 @@ dependencies {
 
      // live variable
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.10.0")
     implementation("androidx.compose.runtime:runtime-livedata")
 
     //offline dependency
@@ -78,6 +81,8 @@ dependencies {
 
     //firestore
     implementation("com.google.firebase:firebase-firestore")
+
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

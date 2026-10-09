@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -84,7 +85,7 @@ fun ChatHistoryDrawerContent(
         modifier = Modifier
             .width(340.dp)
             .fillMaxHeight()
-            .padding(end = 10.dp, top = 10.dp, bottom = 10.dp)
+            .padding(end = 10.dp, top = 6.dp, bottom = 10.dp)
             .shadow(12.dp, RoundedCornerShape(topEnd = 28.dp, bottomEnd = 28.dp)),
         drawerContainerColor = Color.White,
         drawerShape = RoundedCornerShape(topEnd = 28.dp, bottomEnd = 28.dp)
@@ -93,7 +94,9 @@ fun ChatHistoryDrawerContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight()
-                .padding(horizontal = 20.dp, vertical = 24.dp)
+                .statusBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(top = 8.dp, bottom = 20.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),

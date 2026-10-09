@@ -33,6 +33,7 @@ import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -42,6 +43,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -115,6 +117,53 @@ fun AuthScreen(
         errorMessage.isNotEmpty() -> errorMessage
         authstate is Authstate.Error -> (authstate as Authstate.Error).message
         else -> ""
+    }
+
+    val linkPrompt = authstate as? Authstate.LinkGoogleRequiresPassword
+    var linkPassword by remember { mutableStateOf("") }
+
+    if (linkPrompt != null) {
+        AlertDialog(
+            onDismissRequest = {
+                viewModel.cancelPendingGoogleLink()
+                linkPassword = ""
+            },
+            title = { Text("Link Google to your account") },
+            text = {
+                Column {
+                    Text(
+                        "You already have a Veltrix account for ${linkPrompt.email}. " +
+                            "Enter your password once to connect Google sign-in to the same account.",
+                        fontSize = 14.sp
+                    )
+                    linkPrompt.inlineError?.let {
+                        Spacer(Modifier.height(8.dp))
+                        Text(it, color = Color(0xFFDC2626), fontSize = 13.sp)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = linkPassword,
+                        onValueChange = { linkPassword = it },
+                        label = { Text("Account password") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.completeGoogleLinkAtSignIn(linkPassword) },
+                    enabled = !isLoading && linkPassword.isNotBlank()
+                ) { Text("Link & continue") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    viewModel.cancelPendingGoogleLink()
+                    linkPassword = ""
+                }) { Text("Cancel") }
+            }
+        )
     }
 
     Box(

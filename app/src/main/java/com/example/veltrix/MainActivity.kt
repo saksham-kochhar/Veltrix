@@ -1,6 +1,8 @@
 package com.example.veltrix
 
+import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -8,32 +10,91 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
+import com.example.veltrix.notifications.AppForegroundHolder
 import com.example.veltrix.Navigation.navigation
 import com.example.veltrix.ui.theme.VeltrixTheme
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var viewmodel: veltrixviewmodel
+
+    companion object {
+        private const val TAG = "MainActivity"
+        const val EXTRA_NOTIFICATION_ROUTE = "notification_route"
+        const val EXTRA_SESSION_ID = "session_id"
+    }
 
     // Web client ID (type 3) from google-services.json
     private val webClientId =
         "786319689935-2rrh7gdms6p8lol3occs4dbdou1capha.apps.googleusercontent.com"
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        val viewmodel = ViewModelProvider(this)[veltrixviewmodel::class.java]
         super.onCreate(savedInstanceState)
+        viewmodel = ViewModelProvider(this)[veltrixviewmodel::class.java]
+        viewmodel.attachProfileStorage(applicationContext)
+        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) {
+                AppForegroundHolder.isForeground = true
+            }
+
+            override fun onStop(owner: LifecycleOwner) {
+                AppForegroundHolder.isForeground = false
+            }
+        })
+        viewmodel.handleNotificationIntent(intent)
         enableEdgeToEdge()
         setContent {
             VeltrixTheme {
-                navigation(viewmodel, onGoogleClick = { launchGoogleSignIn(viewmodel) })
+                navigation(
+                    viewmodel,
+                    onGoogleSignIn = { launchGoogleSignIn(viewmodel, GoogleSignInMode.SignIn) },
+                    onLinkGoogle = { launchGoogleSignIn(viewmodel, GoogleSignInMode.LinkToCurrentAccount) },
+                )
             }
         }
     }
 
-    private fun launchGoogleSignIn(viewmodel: veltrixviewmodel) {
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        viewmodel.handleNotificationIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewmodel.registerPushIfNeeded(applicationContext)
+        val user = FirebaseAuth.getInstance().currentUser ?: return
+        if (!user.isEmailVerified && user.providerData.any {
+                it.providerId == com.google.firebase.auth.EmailAuthProvider.PROVIDER_ID
+            }
+        ) {
+            return
+        }
+        lifecycleScope.launch {
+            runCatching {
+                if (viewmodel.isCurrentSessionRevoked(this@MainActivity)) {
+                    viewmodel.signout()
+                    return@runCatching
+                }
+                viewmodel.startSecurityListeners()
+                viewmodel.registerSecuritySessionIfNeeded(this@MainActivity)
+                viewmodel.touchSecuritySession(this@MainActivity)
+            }.onFailure { error ->
+                Log.w(TAG, "Security session sync skipped", error)
+            }
+        }
+    }
+
+    private fun launchGoogleSignIn(viewmodel: veltrixviewmodel, mode: GoogleSignInMode) {
         val credentialManager = CredentialManager.create(this)
 
         // GetSignInWithGoogleOption always shows the account picker bottom sheet,
@@ -53,7 +114,7 @@ class MainActivity : ComponentActivity() {
                     credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
                 ) {
                     val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                    viewmodel.signInWithGoogle(googleCredential.idToken)
+                    viewmodel.handleGoogleIdToken(googleCredential.idToken, mode)
                 } else {
                     viewmodel.setError("Unexpected credential type. Try again.")
                 }
