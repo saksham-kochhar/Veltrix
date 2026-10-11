@@ -22,6 +22,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Veltrix"
+rootProject.name = "Cherry AI"
 include(":app")
  

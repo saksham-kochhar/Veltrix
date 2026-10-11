@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.veltrix"
+    namespace = "com.example.cherryai"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -13,7 +13,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.veltrix"
+        applicationId = "com.example.cherryai"
         minSdk = 30
         targetSdk = 36
         versionCode = 1

@@ -8,7 +8,7 @@
             <InsightsFilterSettings>
               <option name="connection">
                 <ConnectionSetting>
-                  <option name="appId" value="com.example.veltrix" />
+                  <option name="appId" value="com.example.cherryai" />
                   <option name="mobileSdkAppId" value="1:786319689935:android:a57d60d5e11724b8c80fba" />
                   <option name="projectId" value="veltrix-a71e5" />
                   <option name="projectNumber" value="786319689935" />

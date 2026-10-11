@@ -1,4 +1,4 @@
-Veltrix is an AI-powered Android chat assistant that works online and offline — using OpenRouter (multi-model) via a secure FastAPI backend when connected, and switching to an on-device ML model when not.
+Cherry AI is an AI-powered Android chat assistant that works online and offline — using OpenRouter (multi-model) via a secure FastAPI backend when connected, and switching to an on-device ML model when not.
 
 ## Features
 

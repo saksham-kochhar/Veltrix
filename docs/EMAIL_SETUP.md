@@ -1,6 +1,6 @@
 # Email setup (optional)
 
-Veltrix security and notification emails are sent from **FastAPI on Render**, not Firebase Cloud Functions or the `mail` collection. Email is **disabled by default** until you complete this checklist.
+Cherry AI security and notification emails are sent from **FastAPI on Render**, not Firebase Cloud Functions or the `mail` collection. Email is **disabled by default** until you complete this checklist.
 
 ## 1. Choose a provider
 
