@@ -1153,25 +1153,26 @@ class cherryAiViewModel : ViewModel(){
 
 
     fun login(email: String, password: String) {
-        _authstate.value = Authstate.Loading
-        auth.signInWithEmailAndPassword(email, password).addOnCompleteListener { task ->
-            if (task.isSuccessful) {
+        viewModelScope.launch {
+            _authstate.value = Authstate.Loading
+            try {
+                val result = securityRepository.loginWithPassword(email, password)
+                auth.signInWithCustomToken(result.customToken).await()
                 val user = auth.currentUser
-                if (user?.isEmailVerified == true) {
-                    this.email = user.email ?: email
-                    loadOrCreateUserProfile(user.uid, this.email)
+                val verified = user?.isEmailVerified == true || result.emailVerified
+                if (verified) {
+                    this@cherryAiViewModel.email = user?.email ?: result.email
+                    loadOrCreateUserProfile(user!!.uid, this@cherryAiViewModel.email)
                 } else {
                     auth.signOut()
                     _authstate.value = Authstate.EmailNotVerified
                 }
-            } else {
-                _authstate.value = Authstate.Error(task.exception?.message ?: "Something Went Wrong!")
-                viewModelScope.launch {
-                    securityRepository.logFailedLogin(
-                        email,
-                        task.exception?.message ?: "login_failed"
-                    )
-                }
+            } catch (e: com.example.cherryai.security.PasswordLoginException) {
+                _authstate.value = Authstate.Error(
+                    e.message ?: "Sign-in failed. Use Forgot password if you are locked out."
+                )
+            } catch (e: Exception) {
+                _authstate.value = Authstate.Error(e.message ?: "Something went wrong")
             }
         }
     }

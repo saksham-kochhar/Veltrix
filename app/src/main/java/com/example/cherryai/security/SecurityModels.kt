@@ -26,6 +26,25 @@ data class ApproxLocation(
     }
 }
 
+data class LoginGateStatus(
+    val allowed: Boolean = true,
+    val attemptsRemaining: Int = 3,
+    val retryAfterSeconds: Int = 0,
+    val locked: Boolean = false,
+    val message: String? = null,
+)
+
+data class PasswordLoginResult(
+    val customToken: String,
+    val email: String,
+    val emailVerified: Boolean,
+)
+
+class PasswordLoginException(
+    message: String,
+    val locked: Boolean = false,
+) : Exception(message)
+
 data class LoginEvent(
     val id: String,
     val timestamp: Timestamp? = null,

@@ -27,6 +27,10 @@ serviceAccount.json
 Backend/
 backend/
 
+# Separate website and admin panel projects
+Website/
+admin/
+
 # Tooling / IDE outputs
 graphify-out/
 

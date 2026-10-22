@@ -26,6 +26,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Check
@@ -33,10 +37,6 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.Button
@@ -415,8 +415,6 @@ fun PlanSelectionScreen(viewmodel: cherryAiViewModel, navController: NavHostCont
                     plan = plan,
                     scale = scale,
                     selected = index == selectedIndex,
-                    isCurrentPlan = plan.id == currentPlan.id,
-                    expiry = if (plan.id == currentPlan.id) expiry else null,
                     onClick = { /* snapping keeps selection centered */ }
                 )
             }
@@ -459,8 +457,6 @@ private fun PlanCardView(
     plan: PlanCard,
     scale: Float,
     selected: Boolean,
-    isCurrentPlan: Boolean,
-    expiry: String?,
     onClick: () -> Unit
 ) {
     Surface(
@@ -493,9 +489,7 @@ private fun PlanCardView(
                     }
                 }
             }
-            // Keep the card footprint stable; current-plan details are shown in the action button.
-            if (isCurrentPlan) Spacer(Modifier.height(40.dp))
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(18.dp))
             Text(plan.name, fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Color(0xFF12133E))
             Text(plan.subtitle, fontSize = 16.sp, color = Color(0xFF77778E), modifier = Modifier.padding(top = 4.dp))
             Spacer(Modifier.height(18.dp))

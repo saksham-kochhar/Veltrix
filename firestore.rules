@@ -54,5 +54,9 @@ service cloud.firestore {
     match /mail/{mailId} {
       allow read, write: if false;
     }
+
+    match /login_throttle/{docId} {
+      allow read, write: if false;
+    }
   }
 }

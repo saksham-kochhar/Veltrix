@@ -56,7 +56,21 @@ class SecurityRepository(
         text
     }
 
-    private suspend fun publicJsonPost(path: String, body: JSONObject): Unit = withContext(Dispatchers.IO) {
+    private suspend fun publicJsonGet(path: String): String = withContext(Dispatchers.IO) {
+        val connection = (URL("$backendBase$path").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            doInput = true
+        }
+        val code = connection.responseCode
+        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+        val text = stream?.bufferedReader()?.readText().orEmpty()
+        if (code !in 200..299) {
+            throw IllegalStateException("Security API $code: $text")
+        }
+        text
+    }
+
+    private suspend fun publicJsonPost(path: String, body: JSONObject): String = withContext(Dispatchers.IO) {
         val connection = (URL("$backendBase$path").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             setRequestProperty("Content-Type", "application/json")
@@ -64,10 +78,54 @@ class SecurityRepository(
             doInput = true
             outputStream.use { it.write(body.toString().toByteArray()) }
         }
-        if (connection.responseCode !in 200..299) {
-            val err = connection.errorStream?.bufferedReader()?.readText()
-            throw IllegalStateException("Security API ${connection.responseCode}: $err")
+        val code = connection.responseCode
+        val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+        val text = stream?.bufferedReader()?.readText().orEmpty()
+        if (code !in 200..299) {
+            throw IllegalStateException("Security API $code: $text")
         }
+        text
+    }
+
+    suspend fun loginWithPassword(email: String, password: String): PasswordLoginResult =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject()
+                .put("email", email.trim())
+                .put("password", password)
+            val connection = (URL("$backendBase/v1/security/login/password").openConnection()
+                as HttpURLConnection).apply {
+                requestMethod = "POST"
+                setRequestProperty("Content-Type", "application/json")
+                doOutput = true
+                doInput = true
+                outputStream.use { it.write(body.toString().toByteArray()) }
+            }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val text = stream?.bufferedReader()?.readText().orEmpty()
+            if (code !in 200..299) {
+                val message = parseFastApiErrorMessage(text)
+                val locked = text.contains("\"locked\":true") || text.contains("\"locked\": true")
+                throw PasswordLoginException(message, locked)
+            }
+            val json = JSONObject(text)
+            PasswordLoginResult(
+                customToken = json.getString("custom_token"),
+                email = json.optString("email", email.trim()),
+                emailVerified = json.optBoolean("email_verified", false),
+            )
+        }
+
+    private fun parseFastApiErrorMessage(text: String): String {
+        return runCatching {
+            val root = JSONObject(text)
+            when (val detail = root.opt("detail")) {
+                is String -> detail
+                is JSONObject -> detail.optString("message").takeIf { it.isNotBlank() }
+                    ?: "Invalid email or password"
+                else -> "Invalid email or password"
+            }
+        }.getOrDefault("Invalid email or password")
     }
 
     suspend fun registerSessionAfterLogin(context: Context, method: String = "password") {
@@ -203,6 +261,16 @@ class SecurityRepository(
             lastActiveAt = optLongOrNull("last_active_at")?.toTimestamp(),
             approxLocation = optJSONObject("approx_location")?.toApproxLocation(),
             status = optString("status", "active")
+        )
+    }
+
+    private fun JSONObject.toLoginGate(): LoginGateStatus {
+        return LoginGateStatus(
+            allowed = optBoolean("allowed", true),
+            attemptsRemaining = optInt("attempts_remaining", 3),
+            retryAfterSeconds = optInt("retry_after_seconds", 0),
+            locked = optBoolean("locked", false),
+            message = optString("message").takeIf { it.isNotBlank() },
         )
     }
 
