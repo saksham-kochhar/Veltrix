@@ -1,6 +1,27 @@
 package com.example.cherryai
 
-object Instruction{
+object Instruction {
+
+    fun forMode(mode: ChatMode): String = withModeIdentity(
+        mode.displayName,
+        when (mode) {
+            ChatMode.Normal -> normal
+            ChatMode.Brainstorm -> brainstorm
+            ChatMode.Learn -> learn
+            ChatMode.Coding -> coding
+        },
+    )
+
+    private fun withModeIdentity(modeName: String, body: String): String =
+        """
+        $body
+
+        ---
+        Cherry AI active mode: $modeName
+        When the user asks which mode you are in, answer clearly that you are in "$modeName" mode (one short sentence), then continue helping.
+        Do not reply with only safety classifier labels (for example "User Safety: safe Response Safety: safe").
+        """.trimIndent()
+
     val brainstorm : String = "You are now in \"Brainstorm Mode\".\n" +
             "\n" +
             "Your job is to act like a highly creative innovation partner whose only goal is to generate new, useful, and actionable ideas.\n" +

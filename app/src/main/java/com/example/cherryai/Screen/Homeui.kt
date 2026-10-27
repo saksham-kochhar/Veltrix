@@ -99,6 +99,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -133,7 +134,8 @@ import com.example.cherryai.ProviderLogos
 import com.example.cherryai.AiModels
 import com.example.cherryai.R
 import com.example.cherryai.AiProvider
-import com.example.cherryai.Instruction
+import com.example.cherryai.ChatMode
+import com.example.cherryai.Authstate
 import com.example.cherryai.Navigation.Routes
 import com.example.cherryai.Response
 import com.example.cherryai.isLimitExhaustedMessage
@@ -151,7 +153,7 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
     val voiceViewModel: VoiceInputViewModel = viewModel()
     val voiceState by voiceViewModel.state.collectAsState()
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) voiceViewModel.start() }
-    var selectedMode by remember { mutableStateOf("Normal") }
+    val selectedMode = viewmodel.chatMode.displayName
     var selectedModelId by remember { mutableStateOf(viewmodel.selectedModelId) }
     var showChatModeSheet by remember { mutableStateOf(false) }
     var showAttachMediaSheet by remember { mutableStateOf(false) }
@@ -176,6 +178,16 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val userProfile by viewmodel.userProfile.collectAsState()
+    val authState by viewmodel.authstate.observeAsState(Authstate.Unauthenticated)
+    UsageAlertHandler(viewmodel)
+    ModelUnavailableHandler(viewmodel)
+    LaunchedEffect(authState) {
+        if (authState is Authstate.Unauthenticated) {
+            navController.navigate(Routes.Auth) {
+                popUpTo(0) { inclusive = true }
+            }
+        }
+    }
     LaunchedEffect(Unit) { voiceViewModel.append.collect { text -> val insertion = if (question.isBlank()) text.replaceFirstChar { it.uppercase() } else " $text"; question += insertion } }
 
     LaunchedEffect(Unit) {
@@ -327,6 +339,7 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
                     selectedId = headerSelectedModelId,
                     modelAccess = modelAccess,
                     freeOnlyMode = freeOnlyMode,
+                    modelPickerOpenNonce = viewmodel.modelPickerOpenNonce,
                     onSelect = { modelId ->
                         if (viewmodel.OnlineMode) {
                             selectedModelId = modelId
@@ -517,9 +530,8 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
                     sheetState = chatModeSheetState,
                     selectedMode = selectedMode,
                     onDismiss = { showChatModeSheet = false },
-                    onSelectMode = { mode, instruction ->
-                        selectedMode = mode
-                        viewmodel.instruction = instruction
+                    onSelectMode = { mode ->
+                        viewmodel.selectChatMode(ChatMode.fromDisplay(mode))
                         showChatModeSheet = false
                     }
                 )
@@ -595,7 +607,7 @@ fun ChatModeBottomSheet(
     sheetState: SheetState,
     selectedMode: String,
     onDismiss: () -> Unit,
-    onSelectMode: (mode: String, instruction: String) -> Unit
+    onSelectMode: (mode: String) -> Unit
 ) {
     val accent = Color(0xFF5B4DFF)
 
@@ -632,7 +644,7 @@ fun ChatModeBottomSheet(
                     subtitle = "Balanced assistant",
                     color = accent,
                     selected = selectedMode == "Normal",
-                    onClick = { onSelectMode("Normal", Instruction.normal) }
+                    onClick = { onSelectMode("Normal") }
                 )
                 ModeGridCard(
                     modifier = Modifier.weight(1f),
@@ -641,7 +653,7 @@ fun ChatModeBottomSheet(
                     subtitle = "Generate ideas",
                     color = Color(0xFF7C4DFF),
                     selected = selectedMode == "Brainstorm",
-                    onClick = { onSelectMode("Brainstorm", Instruction.brainstorm) }
+                    onClick = { onSelectMode("Brainstorm") }
                 )
             }
 
@@ -658,7 +670,7 @@ fun ChatModeBottomSheet(
                     subtitle = "Explain concepts",
                     color = Color(0xFFFF9800),
                     selected = selectedMode == "Learn",
-                    onClick = { onSelectMode("Learn", Instruction.learn) }
+                    onClick = { onSelectMode("Learn") }
                 )
                 ModeGridCard(
                     modifier = Modifier.weight(1f),
@@ -667,7 +679,7 @@ fun ChatModeBottomSheet(
                     subtitle = "Write or debug code",
                     color = Color(0xFF009688),
                     selected = selectedMode == "Coding",
-                    onClick = { onSelectMode("Coding", Instruction.coding) }
+                    onClick = { onSelectMode("Coding") }
                 )
             }
         }
@@ -728,10 +740,14 @@ fun HeaderModelSelector(
     selectedId: String,
     modelAccess: Map<String, Boolean>?,
     freeOnlyMode: Boolean,
+    modelPickerOpenNonce: Int = 0,
     onSelect: (String) -> Unit
 ) {
     var showPicker by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    LaunchedEffect(modelPickerOpenNonce) {
+        if (modelPickerOpenNonce > 0) showPicker = true
+    }
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val pressScale by animateFloatAsState(

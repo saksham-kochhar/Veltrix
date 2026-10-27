@@ -11,6 +11,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -34,6 +35,7 @@ import com.example.cherryai.Screen.NotificationsScreen
 import com.example.cherryai.Screen.SecurityHubScreen
 import com.example.cherryai.Screen.OfflineDataScreen
 import com.example.cherryai.Screen.HelpSupportScreen
+import com.example.cherryai.Authstate
 import com.example.cherryai.cherryAiViewModel
 
 @Composable
@@ -43,8 +45,12 @@ fun navigation(
     onLinkGoogle: () -> Unit,
 ) {
     val navController = rememberNavController()
+    val authState by viewModel.authstate.observeAsState(Authstate.Unauthenticated)
 
-    LaunchedEffect(viewModel.pendingNotificationRoute) {
+    LaunchedEffect(viewModel.pendingNotificationRoute, authState) {
+        if (viewModel.pendingNotificationRoute == null) return@LaunchedEffect
+        if (authState is Authstate.Loading) return@LaunchedEffect
+        if (authState is Authstate.Unauthenticated) return@LaunchedEffect
         val (route, _) = viewModel.consumePendingNotificationRoute()
         when (route) {
             "security_alerts" -> navController.navigate(Routes.security_alerts)

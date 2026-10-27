@@ -58,6 +58,7 @@ import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseAuthUserCollisionException
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.Timestamp
@@ -136,7 +137,15 @@ class cherryAiViewModel : ViewModel(){
     }
     var loading by mutableStateOf(false)
 
-    var instruction by mutableStateOf(Instruction.normal)
+    var chatMode by mutableStateOf(ChatMode.Normal)
+        private set
+
+    var instruction by mutableStateOf(Instruction.forMode(ChatMode.Normal))
+
+    fun selectChatMode(mode: ChatMode) {
+        chatMode = mode
+        instruction = Instruction.forMode(mode)
+    }
 
     var isDownloading by mutableStateOf(false)
     var downloadProgress by mutableStateOf(0f)
@@ -149,6 +158,15 @@ class cherryAiViewModel : ViewModel(){
     var selectedModelId by mutableStateOf(AiModels.DEFAULT_ONLINE_ID)
 
     var walletSnapshot by mutableStateOf(WalletSnapshot())
+        private set
+
+    var pendingUsageAlert by mutableStateOf<UsageAlertPrompt?>(null)
+        private set
+
+    var pendingModelUnavailable by mutableStateOf<String?>(null)
+        private set
+
+    var modelPickerOpenNonce by mutableStateOf(0)
         private set
 
     /** Catalog model id -> server allowed (null = not loaded yet). */
@@ -208,7 +226,7 @@ class cherryAiViewModel : ViewModel(){
                     Pair(wallet, models)
                 }.getOrNull()
             }?.let { (wallet, models) ->
-                walletSnapshot = wallet
+                applyWallet(wallet, historyAppContext ?: profileStorageContext)
                 val access = models.access
                 onlineModelAccess = access
                 onlineModelImageInputSupport = models.imageInputSupport
@@ -316,18 +334,67 @@ class cherryAiViewModel : ViewModel(){
         return false
     }
 
-    private fun applyWalletFromChatJson(response: String) {
-        runCatching {
-            val obj = org.json.JSONObject(response)
-            walletSnapshot = WalletSnapshot.fromJson(obj)
+    fun applyWallet(snapshot: WalletSnapshot, context: Context? = null) {
+        walletSnapshot = snapshot
+        val ctx = (context ?: historyAppContext ?: profileStorageContext)?.applicationContext
+        if (ctx != null) {
+            pendingUsageAlert = UsageAlertStore.nextAlert(ctx, snapshot)
         }
     }
 
-    private fun chatErrorDetail(connection: java.net.HttpURLConnection): String? {
-        val error = connection.errorStream?.bufferedReader()?.readText()
-        return error?.let {
-            runCatching { org.json.JSONObject(it).optString("detail") }.getOrNull()
-        }?.takeIf { it.isNotBlank() }
+    fun dismissUsageAlert(context: Context) {
+        pendingUsageAlert?.let { UsageAlertStore.acknowledge(context.applicationContext, it) }
+        pendingUsageAlert = null
+        UsageAlertStore.nextAlert(context.applicationContext, walletSnapshot)?.let {
+            pendingUsageAlert = it
+        }
+    }
+
+    private fun applyWalletFromChatJson(response: String) {
+        runCatching {
+            applyWallet(WalletSnapshot.fromJson(org.json.JSONObject(response)))
+        }
+    }
+
+    fun clearModelUnavailable() {
+        pendingModelUnavailable = null
+    }
+
+    fun requestOpenModelPicker() {
+        pendingModelUnavailable = null
+        modelPickerOpenNonce++
+    }
+
+    private fun ingestChatErrorPayload(raw: String) {
+        applyWalletFromChatJson(raw)
+        val obj = runCatching { org.json.JSONObject(raw) }.getOrNull() ?: return
+        val detailObj = obj.opt("detail")
+        val code = when (detailObj) {
+            is org.json.JSONObject -> detailObj.optString("code")
+            else -> obj.optString("code")
+        }
+        if (code == "model_unavailable") {
+            val message = when (detailObj) {
+                is org.json.JSONObject -> detailObj.optString("detail")
+                is String -> detailObj
+                else -> ""
+            }
+            pendingModelUnavailable = message.ifBlank {
+                "This model isn't available right now. Choose another model."
+            }
+        }
+    }
+
+    private fun parseChatErrorResponse(connection: java.net.HttpURLConnection): String? {
+        val raw = connection.errorStream?.bufferedReader()?.readText() ?: return null
+        ingestChatErrorPayload(raw)
+        val obj = runCatching { org.json.JSONObject(raw) }.getOrNull()
+        val detail = when (val field = obj?.opt("detail")) {
+            is org.json.JSONObject -> field.optString("detail").ifBlank { field.toString() }
+            is String -> field
+            else -> obj?.optString("detail")
+        }
+        return detail?.takeIf { it.isNotBlank() } ?: raw.takeIf { it.isNotBlank() }
     }
 
     fun String.escapeJson(): String = this
@@ -807,7 +874,16 @@ class cherryAiViewModel : ViewModel(){
                 messagelist.add(Response(question, "User"))
 
                 val idToken = auth.currentUser?.getIdToken(false)?.await()?.token
-                    ?: throw Exception("Not logged in")
+                if (idToken == null) {
+                    _authstate.value = Authstate.Unauthenticated
+                    messagelist.add(
+                        Response(
+                            "Your session expired. Please sign in again to use online chat.",
+                            "Model"
+                        )
+                    )
+                    return@launch
+                }
 
                 val reply = withContext(Dispatchers.IO) {
                     val prior = messagelist.dropLast(1)
@@ -835,6 +911,7 @@ class cherryAiViewModel : ViewModel(){
                         "message": "${question.escapeJson()}",
                         "history": [$history],
                         "instruction": "${instruction.escapeJson()}",
+                        "chat_mode": "${chatMode.displayName.escapeJson()}",
                         "model": "${selectedModelId.escapeJson()}",
                         "profile_summary": $profileJson,
                         "compacted_summary": $compactedJson
@@ -855,15 +932,30 @@ class cherryAiViewModel : ViewModel(){
                             val response = connection.inputStream.bufferedReader().readText()
                             applyWalletFromChatJson(response)
                             refreshOnlineAccount()
-                            org.json.JSONObject(response).getString("reply")
+                            val obj = org.json.JSONObject(response)
+                            val modelUsed = obj.optString("model_used", obj.optString("model", ""))
+                            if (modelUsed.isNotBlank() &&
+                                !AiModels.sameProvider(selectedModelId, modelUsed)
+                            ) {
+                                pendingModelUnavailable =
+                                    "The provider answered as ${AiModels.displayName(modelUsed)} " +
+                                        "instead of your selected ${AiModels.displayName(selectedModelId)} model. " +
+                                        "Choose another model?"
+                            }
+                            obj.getString("reply")
                         }
                         402, 403 -> {
-                            chatErrorDetail(connection)
+                            parseChatErrorResponse(connection)
                                 ?: "Allowance exhausted or model not on your plan. Upgrade to continue."
                         }
                         429 -> {
-                            chatErrorDetail(connection)
+                            parseChatErrorResponse(connection)
                                 ?: "Rate or daily limit reached. Try again later or use the offline model."
+                        }
+                        503 -> {
+                            parseChatErrorResponse(connection)
+                                ?: pendingModelUnavailable
+                                ?: "This model isn't available. Choose another model."
                         }
                         else -> {
                             val error = connection.errorStream?.bufferedReader()?.readText()
@@ -1133,18 +1225,40 @@ class cherryAiViewModel : ViewModel(){
     val auth : FirebaseAuth = FirebaseAuth.getInstance()
     private val _authstate = MutableLiveData<Authstate>()
     val authstate : MutableLiveData<Authstate> = _authstate
+    private var trackedAuthUid: String? = null
 
     init {
-        checkauthstate()
+        auth.addAuthStateListener { firebaseAuth ->
+            val user = firebaseAuth.currentUser
+            val uid = user?.uid
+            if (uid == trackedAuthUid) return@addAuthStateListener
+            trackedAuthUid = uid
+            applyAuthUser(user)
+        }
     }
 
     fun checkauthstate() {
-        val user = auth.currentUser
+        trackedAuthUid = null
+        applyAuthUser(auth.currentUser)
+        trackedAuthUid = auth.currentUser?.uid
+    }
+
+    private fun requiresEmailVerification(user: FirebaseUser): Boolean {
+        if (user.isEmailVerified) return false
+        val hasGoogle = user.providerData.any { it.providerId == GoogleAuthProvider.PROVIDER_ID }
+        val hasPassword = user.providerData.any { it.providerId == EmailAuthProvider.PROVIDER_ID }
+        return hasPassword && !hasGoogle
+    }
+
+    private fun applyAuthUser(user: FirebaseUser?) {
         when {
-            user == null -> _authstate.value = Authstate.Unauthenticated
-            !user.isEmailVerified -> _authstate.value = Authstate.VerificationSent
+            user == null -> {
+                _userProfile.value = null
+                _authstate.value = Authstate.Unauthenticated
+            }
+            requiresEmailVerification(user) -> _authstate.value = Authstate.VerificationSent
             else -> {
-                _authstate.value = Authstate.Loading  // show loading while Firestore fetches
+                _authstate.value = Authstate.Loading
                 email = user.email ?: ""
                 loadOrCreateUserProfile(user.uid, email)
             }
@@ -1247,10 +1361,64 @@ class cherryAiViewModel : ViewModel(){
                 finalizeAndPersistSession(ctx)
             }
             auth.signOut()
+            trackedAuthUid = null
             clearChatHistoryState()
             clearSecurityState()
             _userProfile.value = null
             _authstate.value = Authstate.Unauthenticated
+        }
+    }
+
+    /** Soft-deletes the account while retaining its chat history in Firestore. */
+    fun deleteAccount(onComplete: (Result<Unit>) -> Unit) {
+        val uid = auth.currentUser?.uid
+        if (uid == null) {
+            onComplete(Result.failure(IllegalStateException("No signed-in account")))
+            return
+        }
+        viewModelScope.launch {
+            runCatching {
+                com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                    .collection("users").document(uid)
+                    .update(
+                        mapOf(
+                            "isDeleted" to true,
+                            "deletedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                auth.signOut()
+                clearChatHistoryState()
+                clearSecurityState()
+                _userProfile.value = null
+                _authstate.value = Authstate.Unauthenticated
+            }.onSuccess { onComplete(Result.success(Unit)) }
+                .onFailure { onComplete(Result.failure(it)) }
+        }
+    }
+
+    fun restoreDeletedAccount(onComplete: (Result<Unit>) -> Unit) {
+        val user = auth.currentUser
+        if (user == null) {
+            onComplete(Result.failure(IllegalStateException("No signed-in account")))
+            return
+        }
+        viewModelScope.launch {
+            runCatching {
+                val token = user.getIdToken(false).await()?.token
+                    ?: error("Could not authenticate restore request")
+                val connection = (java.net.URL("$BACKEND_BASE/v1/account/restore").openConnection()
+                    as java.net.HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    setRequestProperty("Authorization", "Bearer $token")
+                    connectTimeout = 15_000
+                    readTimeout = 15_000
+                }
+                val status = connection.responseCode
+                connection.disconnect()
+                if (status !in 200..299) error("Restore request failed ($status)")
+                loadOrCreateUserProfile(user.uid, user.email.orEmpty())
+            }.onSuccess { onComplete(Result.success(Unit)) }
+                .onFailure { onComplete(Result.failure(it)) }
         }
     }
     fun resetState() {
@@ -1402,6 +1570,19 @@ class cherryAiViewModel : ViewModel(){
 
         userRef.get().addOnSuccessListener { document ->
             if (document.exists()) {
+                if (document.getBoolean("isDeleted") == true) {
+                    val deletedAt = document.getTimestamp("deletedAt")?.toDate()?.time
+                    val gracePeriodActive = deletedAt != null &&
+                        System.currentTimeMillis() - deletedAt <= 30L * 24 * 60 * 60 * 1000
+                    if (gracePeriodActive) {
+                        _authstate.value = Authstate.DeletedPendingRestore
+                    } else {
+                        auth.signOut()
+                        _userProfile.value = null
+                        _authstate.value = Authstate.Unauthenticated
+                    }
+                    return@addOnSuccessListener
+                }
                 // Email is owned by Firebase Authentication, not the editable
                 // profile document. This also repairs any stale legacy value.
                 val profile = document.toObject(UserProfile::class.java)
@@ -1711,6 +1892,7 @@ sealed class Authstate{
     object VerificationSent : Authstate()
     object EmailNotVerified : Authstate()
     object ProfileIncomplete : Authstate()
+    object DeletedPendingRestore : Authstate()
     data class LinkGoogleRequiresPassword(
         val email: String,
         val inlineError: String? = null,
@@ -1729,5 +1911,6 @@ data class UserProfile(
     val onboardcomplete : Boolean = false,
     val selectedplan : String = "",
     val profileSummary: String = "",
-    val summarizedChatCount: Int = 0
+    val summarizedChatCount: Int = 0,
+    val isDeleted: Boolean = false
 )

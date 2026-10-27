@@ -279,6 +279,17 @@ object AiModels {
     fun displayName(id: String): String =
         find(id)?.displayName ?: id.substringAfterLast('/')
 
+    fun providerSlug(modelId: String): String =
+        modelId.substringBefore('/').lowercase()
+
+    /** True when OpenRouter wire id matches the catalog model's provider (e.g. google/). */
+    fun sameProvider(requestedCatalogId: String, wireModelId: String): Boolean {
+        val expected = providerSlug(requestedCatalogId)
+        val used = wireModelId.lowercase()
+        if (expected.isBlank()) return true
+        return used.startsWith("$expected/") || providerSlug(wireModelId) == expected
+    }
+
     fun tierLabel(minTier: String): String = when (minTier) {
         "pro" -> "Pro"
         "pro_plus" -> "Pro+"

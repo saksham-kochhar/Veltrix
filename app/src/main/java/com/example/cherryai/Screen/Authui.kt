@@ -1,5 +1,7 @@
 package com.example.cherryai.Screen
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.animateFloat
@@ -36,6 +38,7 @@ import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -58,6 +61,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -87,6 +91,8 @@ fun AuthScreen(
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+    var ageConfirmed by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     val authstate by viewModel.authstate.observeAsState(Authstate.Unauthenticated)
     val primaryBlue = Color(0xFF5A4CFF)
@@ -111,6 +117,23 @@ fun AuthScreen(
             }
             else -> Unit
         }
+    }
+
+    val deletedPendingRestore = authstate is Authstate.DeletedPendingRestore
+    if (deletedPendingRestore) {
+        AlertDialog(
+            onDismissRequest = { viewModel.signout() },
+            title = { Text("Your account is deleted") },
+            text = { Text("Your account is scheduled for permanent deletion after 30 days. Do you want to restore it? By logging in and restoring, your delete request will be cancelled.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.restoreDeletedAccount { result ->
+                        result.onFailure { errorMessage = it.message ?: "Could not restore account" }
+                    }
+                }) { Text("Restore account") }
+            },
+            dismissButton = { TextButton(onClick = { viewModel.signout() }) { Text("Keep deleted") } }
+        )
     }
 
     val displayError = when {
@@ -310,6 +333,18 @@ fun AuthScreen(
                     modifier = Modifier.fillMaxWidth().height(64.dp),
                     singleLine = true
                 )
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Checkbox(checked = ageConfirmed, onCheckedChange = { ageConfirmed = it })
+                    Text("I confirm that I am 18 or older.", fontSize = 13.sp, color = Color(0xFF6B6B78))
+                }
+                Text(
+                    "By signing up, you agree to the Terms and Privacy Policy.",
+                    fontSize = 12.sp,
+                    color = primaryBlue,
+                    modifier = Modifier.clickable {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://cherryai.app/terms-of-service")))
+                    }.padding(start = 12.dp, top = 2.dp)
+                )
             }
 
             if (selectedTab == 0) {
@@ -340,6 +375,8 @@ fun AuthScreen(
                             errorMessage = "Enter a valid email address"
                         selectedTab == 1 && password != confirmPassword ->
                             errorMessage = "Passwords do not match"
+                        selectedTab == 1 && !ageConfirmed ->
+                            errorMessage = "You must confirm that you are 18 or older"
                         selectedTab == 0 -> viewModel.login(viewModel.email, password)
                         else -> viewModel.signup(viewModel.email, password)
                     }

@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import com.example.cherryai.cherryAiViewModel
+import com.example.cherryai.Navigation.Routes
 
 private const val SUPPORT_EMAIL = "support@example.com"
 
@@ -47,6 +50,8 @@ private const val SUPPORT_EMAIL = "support@example.com"
 fun HelpSupportScreen(navController: NavHostController, viewModel: cherryAiViewModel) {
     val context = LocalContext.current
     val profile by viewModel.userProfile.collectAsState()
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var deleteInProgress by remember { mutableStateOf(false) }
     val faqs = listOf(
         "How do I change my plan?" to "Open Billing & Subscription from Account, then swipe through the available plans and choose one.",
         "Can I use Cherry AI offline?" to "Yes. Download the offline model from the home screen. You can manage downloaded models under Account > Offline Data.",
@@ -110,6 +115,77 @@ fun HelpSupportScreen(navController: NavHostController, viewModel: cherryAiViewM
                 }
             }
         }
-        item { Spacer(Modifier.height(24.dp)) }
+        item {
+            Spacer(Modifier.height(12.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth().clickable {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://cherryai.app/privacy-policy"))
+                    runCatching { context.startActivity(intent) }
+                },
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Column(Modifier.fillMaxWidth().padding(20.dp)) {
+                    Text("Privacy policy", fontWeight = FontWeight.Bold, color = Color(0xFF1A1A3A))
+                    Text("Read how Cherry AI collects, uses, and deletes your data.", color = Color(0xFF8A8A98), modifier = Modifier.padding(top = 6.dp))
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth().clickable {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://cherryai.app/terms-of-service"))
+                    runCatching { context.startActivity(intent) }
+                },
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Column(Modifier.fillMaxWidth().padding(20.dp)) {
+                    Text("Terms & Conditions", fontWeight = FontWeight.Bold, color = Color(0xFF1A1A3A))
+                    Text("Review the rules and conditions for using Cherry AI.", color = Color(0xFF8A8A98), modifier = Modifier.padding(top = 6.dp))
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth().clickable { showDeleteConfirmation = true },
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF1F1))
+            ) {
+                Column(Modifier.fillMaxWidth().padding(20.dp)) {
+                    Text("Delete account", fontWeight = FontWeight.Bold, color = Color(0xFFC62828))
+                    Text(
+                        "Hide your profile for 30 days before permanent deletion. Your chats are retained securely during this period.",
+                        color = Color(0xFF8A8A98),
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+
+    if (showDeleteConfirmation) {
+        AlertDialog(
+            onDismissRequest = { if (!deleteInProgress) showDeleteConfirmation = false },
+            title = { Text("Delete account?") },
+            text = { Text("Your profile will be hidden and you will be signed out. You have 30 days to recover your account; after that, your profile, chats, tokens, sessions, wallet data, and Firebase account will be permanently deleted.") },
+            confirmButton = {
+                TextButton(
+                    enabled = !deleteInProgress,
+                    onClick = {
+                        deleteInProgress = true
+                        viewModel.deleteAccount { result ->
+                            result.onSuccess {
+                                showDeleteConfirmation = false
+                                navController.navigate(Routes.Auth) { popUpTo(0) { inclusive = true } }
+                            }.onFailure {
+                                deleteInProgress = false
+                                Toast.makeText(context, "Couldn't delete account. Please try again.", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                ) { Text(if (deleteInProgress) "Deleting…" else "Delete account", color = Color(0xFFC62828)) }
+            },
+            dismissButton = { TextButton(enabled = !deleteInProgress, onClick = { showDeleteConfirmation = false }) { Text("Cancel") } }
+        )
     }
 }

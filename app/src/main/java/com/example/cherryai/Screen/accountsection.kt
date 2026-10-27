@@ -76,6 +76,7 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: cherryAiViewModel
     LaunchedEffect(Unit) {
         viewmodel.fetchWallet()
     }
+    UsageAlertHandler(viewmodel)
     val fullName = "${profile?.firstname.orEmpty()} ${profile?.lastname.orEmpty()}".trim()
 
     val menuItems = listOf(
@@ -322,24 +323,6 @@ private fun UsageAllowanceSection(wallet: WalletSnapshot) {
             modifier = Modifier.weight(1f)
         )
     }
-    Text(
-        text = "Monthly remaining: ${wallet.monthlyRemainingPercent}% · Daily remaining: ${wallet.dailyRemainingPercent}%",
-        fontSize = 12.sp,
-        color = AccountMuted,
-        textAlign = TextAlign.Center,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp)
-    )
-    if (wallet.freeOnlyMode) {
-        Spacer(modifier = Modifier.height(10.dp))
-        Text(
-            text = "Monthly allowance reached — free models only until reset.",
-            fontSize = 12.sp,
-            color = Color(0xFFB45309),
-            lineHeight = 16.sp
-        )
-    }
 }
 
 @Composable
@@ -386,10 +369,12 @@ private fun UsagePercentRing(
                 )
             }
             Text(
-                text = "$percent%",
+                text = "$percent% used",
                 fontWeight = FontWeight.Bold,
-                fontSize = 17.sp,
-                color = AccountNavy
+                fontSize = 14.sp,
+                color = AccountNavy,
+                textAlign = TextAlign.Center,
+                lineHeight = 16.sp,
             )
         }
         Spacer(modifier = Modifier.height(6.dp))
