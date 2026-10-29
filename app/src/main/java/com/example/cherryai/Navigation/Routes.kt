@@ -15,4 +15,5 @@ object Routes {
     val notifications = "Notifications"
     val offlineData = "OfflineData"
     val helpSupport = "HelpSupport"
+    val settings = "Settings"
 }

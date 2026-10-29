@@ -155,8 +155,26 @@ class SecurityRepository(
                 "GET",
                 "/v1/security/sessions/status?session_id=$sessionId"
             )
-            JSONObject(response).optBoolean("revoked", false)
+            if (!JSONObject(response).optBoolean("revoked", false)) {
+                return@runCatching false
+            }
+            // Older backend builds treated unknown session ids as revoked; confirm the doc exists.
+            fetchSessions().any { it.id == sessionId }
         }.getOrDefault(false)
+    }
+
+    /**
+     * Registers the device session if needed, keeps activity fresh, and reports whether
+     * this device was explicitly revoked server-side (sign-out-all, remote revoke, etc.).
+     */
+    suspend fun syncSecuritySession(context: Context, method: String = "password"): Boolean {
+        val app = context.applicationContext
+        if (isCurrentSessionRevoked(app)) {
+            return true
+        }
+        registerSessionAfterLogin(app, method)
+        touchSessionActivity(app)
+        return false
     }
 
     suspend fun fetchSessions(): List<DeviceSession> {

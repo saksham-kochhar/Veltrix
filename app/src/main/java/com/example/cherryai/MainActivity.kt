@@ -6,6 +6,10 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
@@ -18,6 +22,8 @@ import androidx.lifecycle.lifecycleScope
 import com.example.cherryai.notifications.AppForegroundHolder
 import com.example.cherryai.Navigation.navigation
 import com.example.cherryai.ui.theme.CherryAITheme
+import com.example.cherryai.ui.theme.ThemeMode
+import com.example.cherryai.ui.theme.ThemePreferences
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
@@ -53,9 +59,14 @@ class MainActivity : ComponentActivity() {
         viewmodel.handleNotificationIntent(intent)
         enableEdgeToEdge()
         setContent {
-            CherryAITheme {
+            var themeMode by remember {
+                mutableStateOf(ThemePreferences.getMode(applicationContext))
+            }
+            CherryAITheme(themeMode = themeMode) {
                 navigation(
                     viewmodel,
+                    themeMode = themeMode,
+                    onThemeModeChanged = { themeMode = it },
                     onGoogleSignIn = { launchGoogleSignIn(viewmodel, GoogleSignInMode.SignIn) },
                     onLinkGoogle = { launchGoogleSignIn(viewmodel, GoogleSignInMode.LinkToCurrentAccount) },
                 )
@@ -81,13 +92,11 @@ class MainActivity : ComponentActivity() {
         }
         lifecycleScope.launch {
             runCatching {
-                if (viewmodel.isCurrentSessionRevoked(this@MainActivity)) {
+                if (viewmodel.syncSecuritySession(this@MainActivity)) {
                     viewmodel.signout()
                     return@runCatching
                 }
                 viewmodel.startSecurityListeners()
-                viewmodel.registerSecuritySessionIfNeeded(this@MainActivity)
-                viewmodel.touchSecuritySession(this@MainActivity)
             }.onFailure { error ->
                 Log.w(TAG, "Security session sync skipped", error)
             }

@@ -35,17 +35,21 @@ import com.example.cherryai.Screen.NotificationsScreen
 import com.example.cherryai.Screen.SecurityHubScreen
 import com.example.cherryai.Screen.OfflineDataScreen
 import com.example.cherryai.Screen.HelpSupportScreen
+import com.example.cherryai.Screen.SettingsScreen
 import com.example.cherryai.Authstate
 import com.example.cherryai.cherryAiViewModel
+import com.example.cherryai.ui.theme.ThemeMode
 
 @Composable
 fun navigation(
     viewModel: cherryAiViewModel,
+    themeMode: ThemeMode,
+    onThemeModeChanged: (ThemeMode) -> Unit,
     onGoogleSignIn: () -> Unit,
     onLinkGoogle: () -> Unit,
 ) {
     val navController = rememberNavController()
-    val authState by viewModel.authstate.observeAsState(Authstate.Unauthenticated)
+    val authState by viewModel.authstate.observeAsState(Authstate.Loading)
 
     LaunchedEffect(viewModel.pendingNotificationRoute, authState) {
         if (viewModel.pendingNotificationRoute == null) return@LaunchedEffect
@@ -125,7 +129,10 @@ fun navigation(
             )
         }
         composable(Routes.Home) {
-            ChatbotScreen(viewmodel = viewModel, navController)
+            ChatbotScreen(
+                viewmodel = viewModel,
+                navController = navController,
+            )
         }
         composable(Routes.verification) {
             VerificationScreen(viewModel = viewModel, navController)
@@ -147,6 +154,13 @@ fun navigation(
         }
         composable(Routes.helpSupport) {
             HelpSupportScreen(navController = navController, viewModel = viewModel)
+        }
+        composable(Routes.settings) {
+            SettingsScreen(
+                navController = navController,
+                themeMode = themeMode,
+                onThemeModeChanged = onThemeModeChanged,
+            )
         }
         composable(Routes.security) {
             SecurityHubScreen(

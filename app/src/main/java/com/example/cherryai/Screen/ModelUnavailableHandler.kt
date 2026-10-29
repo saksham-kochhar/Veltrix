@@ -39,18 +39,21 @@ private val ModelDialogIconBg = Color(0xFFF3F1FF)
 
 @Composable
 fun ModelUnavailableHandler(viewModel: cherryAiViewModel) {
-    val message = viewModel.pendingModelUnavailable ?: return
-    val dialogShape = RoundedCornerShape(28.dp)
+    val message = viewModel.pendingChatDialogMessage ?: return
+    val isModelIssue = message.contains("unavailable", ignoreCase = true) ||
+        message.contains("Choose another model", ignoreCase = true)
+    val dialogTitle = viewModel.pendingChatDialogTitle
+        ?: if (isModelIssue) "Model unavailable" else "Couldn't send message"
 
     Dialog(
-        onDismissRequest = { viewModel.clearModelUnavailable() },
+        onDismissRequest = { viewModel.clearChatDialog() },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 28.dp),
-            shape = dialogShape,
+            shape = RoundedCornerShape(28.dp),
             color = Color.White,
             shadowElevation = 16.dp,
             tonalElevation = 0.dp,
@@ -77,7 +80,7 @@ fun ModelUnavailableHandler(viewModel: cherryAiViewModel) {
                 Spacer(modifier = Modifier.height(20.dp))
 
                 Text(
-                    text = "Model unavailable",
+                    text = dialogTitle,
                     fontWeight = FontWeight.Bold,
                     fontSize = 20.sp,
                     color = ModelDialogTitle,
@@ -100,7 +103,13 @@ fun ModelUnavailableHandler(viewModel: cherryAiViewModel) {
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Button(
-                    onClick = { viewModel.requestOpenModelPicker() },
+                    onClick = {
+                        if (isModelIssue) {
+                            viewModel.requestOpenModelPicker()
+                        } else {
+                            viewModel.clearChatDialog()
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp),
@@ -108,14 +117,14 @@ fun ModelUnavailableHandler(viewModel: cherryAiViewModel) {
                     colors = ButtonDefaults.buttonColors(containerColor = ModelDialogPrimary),
                 ) {
                     Text(
-                        text = "Choose another model",
+                        text = if (isModelIssue) "Choose another model" else "OK",
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 15.sp,
                     )
                 }
 
                 TextButton(
-                    onClick = { viewModel.clearModelUnavailable() },
+                    onClick = { viewModel.clearChatDialog() },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(

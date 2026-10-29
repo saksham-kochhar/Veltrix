@@ -13,6 +13,9 @@ object SessionStore {
     private const val FALLBACK_PREFS = "cherryai_security_session_fallback"
     private const val KEY_SESSION_ID = "session_id"
 
+    @Volatile
+    private var memorySessionId: String? = null
+
     private fun encryptedPrefs(context: Context): SharedPreferences {
         val app = context.applicationContext
         val masterKey = MasterKey.Builder(app)
@@ -48,22 +51,35 @@ object SessionStore {
     }
 
     fun getOrCreateSessionId(context: Context): String {
+        memorySessionId?.let { return it }
         return try {
             val p = prefs(context.applicationContext)
             val existing = p.getString(KEY_SESSION_ID, null)
-            if (!existing.isNullOrBlank()) return existing
+            if (!existing.isNullOrBlank()) {
+                memorySessionId = existing
+                return existing
+            }
             val created = UUID.randomUUID().toString().replace("-", "")
             p.edit().putString(KEY_SESSION_ID, created).apply()
+            memorySessionId = created
             created
         } catch (e: Exception) {
             Log.e(TAG, "Failed to persist session id", e)
-            UUID.randomUUID().toString().replace("-", "")
+            val ephemeral = UUID.randomUUID().toString().replace("-", "")
+            memorySessionId = ephemeral
+            ephemeral
         }
     }
 
     fun clearSessionId(context: Context) {
+        memorySessionId = null
         runCatching {
             prefs(context.applicationContext).edit().remove(KEY_SESSION_ID).apply()
         }
+    }
+
+    fun rotateSessionId(context: Context): String {
+        clearSessionId(context)
+        return getOrCreateSessionId(context)
     }
 }

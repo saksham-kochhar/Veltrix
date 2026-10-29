@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,6 +32,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,23 +43,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.cherryai.Screen.ProfileAvatar
+import com.example.cherryai.ui.theme.cherryUiColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 private val HistoryPurple = Color(0xFF635BFF)
-private val HistoryNavy = Color(0xFF1A1C2E)
-private val HistoryMuted = Color(0xFF9E9E9E)
-private val HistorySearchBg = Color(0xFFF3F4F9)
-private val HistorySelectedBg = Color(0xFFEBEBFF)
-private val HistoryNewChatBg = Color(0xFFF0EEFF)
-private val HistoryIconGrayBg = Color(0xFFF0F0F5)
-private val HistoryIconGray = Color(0xFFB0B0BC)
 
 @Composable
 fun ChatHistoryDrawerContent(
@@ -69,6 +68,13 @@ fun ChatHistoryDrawerContent(
     firstName: String? = null,
     lastName: String? = null
 ) {
+    val ui = cherryUiColors()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    fun dismissKeyboard() {
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
+    }
     var searchQuery by remember { mutableStateOf("") }
     val filteredSessions = remember(sessions, searchQuery) {
         if (searchQuery.isBlank()) sessions
@@ -87,7 +93,7 @@ fun ChatHistoryDrawerContent(
             .fillMaxHeight()
             .padding(end = 10.dp, top = 6.dp, bottom = 10.dp)
             .shadow(12.dp, RoundedCornerShape(topEnd = 28.dp, bottomEnd = 28.dp)),
-        drawerContainerColor = Color.White,
+        drawerContainerColor = ui.drawerBackground,
         drawerShape = RoundedCornerShape(topEnd = 28.dp, bottomEnd = 28.dp)
     ) {
         Column(
@@ -107,14 +113,17 @@ fun ChatHistoryDrawerContent(
                     text = "History",
                     fontSize = 26.sp,
                     fontWeight = FontWeight.Bold,
-                    color = HistoryNavy
+                    color = ui.drawerTitle
                 )
                 ProfileAvatar(
                     firstName = firstName,
                     lastName = lastName,
                     size = 40.dp,
                     fontSize = 14.sp,
-                    modifier = Modifier.clickable(onClick = onOpenAccount)
+                    modifier = Modifier.clickable {
+                        dismissKeyboard()
+                        onOpenAccount()
+                    }
                 )
             }
 
@@ -129,7 +138,7 @@ fun ChatHistoryDrawerContent(
                 placeholder = {
                     Text(
                         text = "Search chats...",
-                        color = HistoryMuted,
+                        color = ui.drawerMuted,
                         fontSize = 15.sp
                     )
                 },
@@ -137,16 +146,16 @@ fun ChatHistoryDrawerContent(
                     Icon(
                         imageVector = Icons.Outlined.Search,
                         contentDescription = null,
-                        tint = HistoryMuted,
+                        tint = ui.drawerMuted,
                         modifier = Modifier.size(20.dp)
                     )
                 },
                 singleLine = true,
                 shape = RoundedCornerShape(50),
                 colors = TextFieldDefaults.colors(
-                    focusedContainerColor = HistorySearchBg,
-                    unfocusedContainerColor = HistorySearchBg,
-                    disabledContainerColor = HistorySearchBg,
+                    focusedContainerColor = ui.drawerSearchBg,
+                    unfocusedContainerColor = ui.drawerSearchBg,
+                    disabledContainerColor = ui.drawerSearchBg,
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
                     cursorColor = HistoryPurple
@@ -159,8 +168,11 @@ fun ChatHistoryDrawerContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(50))
-                    .background(HistoryNewChatBg)
-                    .clickable(onClick = onNewChat)
+                    .background(ui.drawerNewChatBg)
+                    .clickable {
+                        dismissKeyboard()
+                        onNewChat()
+                    }
                     .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -183,7 +195,7 @@ fun ChatHistoryDrawerContent(
                     text = "New chat",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = HistoryNavy
+                    color = ui.drawerTitle
                 )
             }
 
@@ -197,7 +209,7 @@ fun ChatHistoryDrawerContent(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-            HorizontalDivider(color = Color(0xFFF0F0F5))
+            HorizontalDivider(color = ui.divider)
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -205,25 +217,94 @@ fun ChatHistoryDrawerContent(
                 Text(
                     text = if (searchQuery.isBlank()) "No chats yet" else "No matching chats",
                     fontSize = 14.sp,
-                    color = HistoryMuted,
+                    color = ui.drawerMuted,
                     modifier = Modifier.padding(vertical = 24.dp)
                 )
                 Spacer(modifier = Modifier.weight(1f))
             } else {
+                val historyListState = rememberLazyListState()
+                val historyScrolling by remember {
+                    derivedStateOf { historyListState.isScrollInProgress }
+                }
+                LaunchedEffect(historyScrolling) {
+                    if (historyScrolling) dismissKeyboard()
+                }
                 LazyColumn(
+                    state = historyListState,
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.weight(1f)
                 ) {
                     items(filteredSessions, key = { it.id }) { session ->
-                        ChatHistoryRow(
-                            session = session,
-                            selected = session.id == currentSessionId,
-                            onClick = { onOpenSession(session.id) }
-                        )
+                        if (!session.cachedLocally && historyScrolling) {
+                            CloudChatHistoryPlaceholderRow(
+                                title = session.title.ifBlank { "New chat" },
+                                selected = session.id == currentSessionId
+                            )
+                        } else {
+                            ChatHistoryRow(
+                                session = session,
+                                selected = session.id == currentSessionId,
+                                onClick = {
+                                    dismissKeyboard()
+                                    onOpenSession(session.id)
+                                },
+                            )
+                        }
                     }
                 }
             }
 
+        }
+    }
+}
+
+@Composable
+private fun CloudChatHistoryPlaceholderRow(
+    title: String,
+    selected: Boolean
+) {
+    val ui = cherryUiColors()
+    val rowBg = if (selected) ui.drawerSelectedBg else Color.Transparent
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(rowBg)
+            .padding(horizontal = 12.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(ui.drawerIconBg),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.CloudOff,
+                contentDescription = null,
+                tint = ui.drawerIconTint,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = ui.drawerTitle,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.45f)
+                    .height(10.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(ui.drawerSearchBg)
+            )
         }
     }
 }
@@ -234,11 +315,12 @@ private fun ChatHistoryRow(
     selected: Boolean,
     onClick: () -> Unit
 ) {
+    val ui = cherryUiColors()
     val timeLabel = formatChatTime(session.updatedAt)
-    val rowBg = if (selected) HistorySelectedBg else Color.Transparent
-    val iconBg = if (selected) HistoryPurple else HistoryIconGrayBg
-    val iconTint = if (selected) Color.White else HistoryIconGray
-    val titleColor = if (selected) HistoryPurple else HistoryNavy
+    val rowBg = if (selected) ui.drawerSelectedBg else Color.Transparent
+    val iconBg = if (selected) HistoryPurple else ui.drawerIconBg
+    val iconTint = if (selected) Color.White else ui.drawerIconTint
+    val titleColor = if (selected) HistoryPurple else ui.drawerTitle
 
     Row(
         modifier = Modifier
@@ -282,7 +364,7 @@ private fun ChatHistoryRow(
                     Icon(
                         imageVector = Icons.Outlined.CloudOff,
                         contentDescription = "Cloud only",
-                        tint = HistoryMuted,
+                        tint = ui.drawerMuted,
                         modifier = Modifier.size(14.dp)
                     )
                 }
@@ -292,7 +374,7 @@ private fun ChatHistoryRow(
                 Text(
                     text = timeLabel,
                     fontSize = 12.sp,
-                    color = HistoryMuted
+                    color = ui.drawerMuted
                 )
             }
         }
@@ -300,7 +382,7 @@ private fun ChatHistoryRow(
         Icon(
             imageVector = Icons.Outlined.MoreVert,
             contentDescription = "Chat options",
-            tint = HistoryMuted,
+            tint = ui.drawerMuted,
             modifier = Modifier.size(20.dp)
         )
     }

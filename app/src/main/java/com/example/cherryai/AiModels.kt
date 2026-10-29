@@ -245,10 +245,45 @@ object AiModels {
         return filteredStandalone to filteredProviders
     }
 
+    /** OpenRouter (plus client health cache) — independent of plan tier. */
+    fun isLocalModel(modelId: String): Boolean = modelId == offline.id
+
+    fun isOpenRouterAvailable(
+        modelId: String,
+        availability: Map<String, Boolean>?
+    ): Boolean {
+        if (isLocalModel(modelId)) return true
+        if (availability == null) return true
+        return availability[modelId] != false
+    }
+
+    fun isSelectableOnlineModel(
+        modelId: String,
+        access: Map<String, Boolean>?,
+        availability: Map<String, Boolean>?
+    ): Boolean =
+        isModelAllowed(modelId, access) && isOpenRouterAvailable(modelId, availability)
+
+    fun firstSelectableModelId(
+        standalone: List<AiModelOption>,
+        providerList: List<AiProvider>,
+        access: Map<String, Boolean>?,
+        availability: Map<String, Boolean>?
+    ): String? =
+        standalone.firstOrNull { isSelectableOnlineModel(it.id, access, availability) }?.id
+            ?: providerList
+                .flatMap { it.models }
+                .firstOrNull { isSelectableOnlineModel(it.id, access, availability) }
+                ?.id
+
     private fun modelMatchesQuery(model: AiModelOption, query: String): Boolean =
         model.displayName.lowercase().contains(query) || model.id.lowercase().contains(query)
 
+    fun isAutoSelection(modelId: String): Boolean =
+        modelId == auto.id || modelId == LEGACY_AUTO_ACCESS_ID
+
     fun isModelAllowed(modelId: String, access: Map<String, Boolean>?): Boolean {
+        if (isLocalModel(modelId)) return true
         if (access == null || access.isEmpty()) {
             return find(modelId)?.minTier == "free"
         }

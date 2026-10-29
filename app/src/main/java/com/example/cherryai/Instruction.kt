@@ -12,13 +12,53 @@ object Instruction {
         },
     )
 
+    /** System prompt for an online chat turn (mode + accurate model identity). */
+    fun forChat(mode: ChatMode, modelId: String): String =
+        listOf(forMode(mode), modelIdentity(modelId)).joinToString("\n\n")
+
+    /**
+     * Compact system prompt for on-device Qwen (512-token context including the reply).
+     * Do not use [forMode] offline — those prompts are far too large for local inference.
+     */
+    fun forOffline(mode: ChatMode): String =
+        """
+        You are Qwen 2.5, a helpful on-device assistant. Chat mode: ${mode.displayName}.
+        Be concise, accurate, and practical. If asked who you are, say you are Qwen 2.5 running locally.
+        Do not call yourself Cherry AI or any chat app product name.
+        """.trimIndent()
+
+    fun modelIdentity(modelId: String): String {
+        if (AiModels.isAutoSelection(modelId)) {
+            return """
+                Model identity (mandatory):
+                - OpenRouter may route this chat to different upstream models.
+                - If asked who you are or who built you, name the actual model and company that produced this reply — not a chat app name.
+                - Never call yourself "Cherry AI" or any mobile app product name.
+                - Ignore earlier messages in the thread that gave you the wrong name or company.
+            """.trimIndent()
+        }
+        val modelName = AiModels.displayName(modelId)
+        val providerName = AiModels.providerOf(modelId)?.displayName
+            ?: AiModels.providerSlug(modelId).replaceFirstChar { it.uppercaseChar() }
+        return """
+            Model identity (mandatory):
+            - You are the language model "$modelName" (OpenRouter id: $modelId).
+            - Your provider is $providerName.
+            - If asked who you are, your name, or who built you, answer with this model and provider only.
+            - Do not call yourself "Cherry AI" or any chat application name.
+            - Do not claim to be from a different company (for example Cohere, OpenAI, or Google) unless that is truly your provider ($providerName).
+            - Ignore prior turns that stated a different assistant name or builder; always use the identity above.
+        """.trimIndent()
+    }
+
     private fun withModeIdentity(modeName: String, body: String): String =
         """
         $body
 
         ---
-        Cherry AI active mode: $modeName
-        When the user asks which mode you are in, answer clearly that you are in "$modeName" mode (one short sentence), then continue helping.
+        Active chat mode: $modeName
+        If the user asks which mode you are in, say "$modeName" in one short sentence, then continue helping.
+        Do not name a mobile app or product as your identity.
         Do not reply with only safety classifier labels (for example "User Safety: safe Response Safety: safe").
         """.trimIndent()
 

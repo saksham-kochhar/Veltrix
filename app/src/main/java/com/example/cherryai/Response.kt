@@ -11,5 +11,6 @@ fun Response.isLimitExhaustedMessage(): Boolean {
     val lower = message.lowercase()
     return lower.contains("daily free request limit") ||
         lower.contains("daily credit limit") ||
-        lower.contains("12-hour credit limit")
+        lower.contains("12-hour credit limit") ||
+        lower.contains("your credit limit has been reached")
 }

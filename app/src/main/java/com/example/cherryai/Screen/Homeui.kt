@@ -1,5 +1,8 @@
 package com.example.cherryai.Screen
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -37,6 +40,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -45,12 +51,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
@@ -69,6 +82,7 @@ import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.School
@@ -93,6 +107,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -105,9 +120,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
@@ -132,6 +149,7 @@ import androidx.navigation.NavHostController
 import com.example.cherryai.AiModelOption
 import com.example.cherryai.ProviderLogos
 import com.example.cherryai.AiModels
+import com.example.cherryai.ModelPickerPreferences
 import com.example.cherryai.R
 import com.example.cherryai.AiProvider
 import com.example.cherryai.ChatMode
@@ -139,19 +157,28 @@ import com.example.cherryai.Authstate
 import com.example.cherryai.Navigation.Routes
 import com.example.cherryai.Response
 import com.example.cherryai.isLimitExhaustedMessage
+import com.example.cherryai.voice.ChatGptVoiceBar
 import com.example.cherryai.voice.VoiceInputViewModel
 import com.example.cherryai.voice.VoiceState
+import com.example.cherryai.voice.showVoiceBar
 import com.example.cherryai.chathistorry.ChatHistoryDrawerContent
 import com.example.cherryai.cherryAiViewModel
+import com.example.cherryai.ui.theme.CherryUiColors
+import com.example.cherryai.ui.theme.cherryUiColors
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostController) {
+fun ChatbotScreen(
+    viewmodel: cherryAiViewModel,
+    navController: NavHostController,
+) {
 
      var question by remember { mutableStateOf("") }
     val voiceViewModel: VoiceInputViewModel = viewModel()
     val voiceState by voiceViewModel.state.collectAsState()
+    val voiceWaveform by voiceViewModel.waveformBands.collectAsState()
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) voiceViewModel.start() }
     val selectedMode = viewmodel.chatMode.displayName
     var selectedModelId by remember { mutableStateOf(viewmodel.selectedModelId) }
@@ -166,6 +193,31 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
         else -> Color(0xFFF5F5FA)
     }
     val context = LocalContext.current
+    val ui = cherryUiColors()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    fun dismissKeyboard() {
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
+    }
+    fun submitQuestion() {
+        val text = question.trim()
+        if (text.isBlank()) return
+        keyboardController?.hide()
+        focusManager.clearFocus()
+        viewmodel.initChatHistory(context)
+        if (viewmodel.loading) {
+            viewmodel.queueMessage(text)
+            question = ""
+            return
+        }
+        if (viewmodel.OnlineMode) {
+            viewmodel.sendmessage(text)
+        } else {
+            viewmodel.sendMessageOffline(text)
+        }
+        question = ""
+    }
     var attachedMediaUri by remember { mutableStateOf<Uri?>(null) }
     val mediaPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -177,6 +229,32 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
     }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val chatListState = rememberLazyListState()
+    val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
+
+    fun scrollChatToEnd() {
+        scope.launch {
+            chatListState.scrollChatToEnd(
+                messageCount = viewmodel.messagelist.size,
+                isLoading = viewmodel.loading,
+            )
+        }
+    }
+
+    LaunchedEffect(imeBottom) {
+        if (imeBottom > 0.dp) {
+            delay(50)
+            chatListState.scrollChatToEnd(
+                messageCount = viewmodel.messagelist.size,
+                isLoading = viewmodel.loading,
+            )
+        }
+    }
+    LaunchedEffect(drawerState) {
+        snapshotFlow { drawerState.currentValue }.collect {
+            dismissKeyboard()
+        }
+    }
     val userProfile by viewmodel.userProfile.collectAsState()
     val authState by viewmodel.authstate.observeAsState(Authstate.Unauthenticated)
     UsageAlertHandler(viewmodel)
@@ -188,7 +266,25 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
             }
         }
     }
-    LaunchedEffect(Unit) { voiceViewModel.append.collect { text -> val insertion = if (question.isBlank()) text.replaceFirstChar { it.uppercase() } else " $text"; question += insertion } }
+    LaunchedEffect(Unit) {
+        voiceViewModel.pasteToInput.collect { text ->
+            val insertion = if (question.isBlank()) text.replaceFirstChar { it.uppercase() } else " $text"
+            question += insertion
+        }
+    }
+    LaunchedEffect(Unit) {
+        voiceViewModel.sendDirect.collect { text ->
+            question = text.trim()
+            submitQuestion()
+        }
+    }
+
+    LaunchedEffect(voiceState) {
+        if (voiceState is VoiceState.Error) {
+            Toast.makeText(context, (voiceState as VoiceState.Error).message, Toast.LENGTH_LONG).show()
+            voiceViewModel.clearError()
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewmodel.initChatHistory(context)
@@ -196,29 +292,29 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
         if (viewmodel.OnlineMode) {
             viewmodel.refreshOnlineAccount()
         }
-        if (viewmodel.isModelDownloaded) {
-            viewmodel.loadLocalModel(context)
-        }
     }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
             ChatHistoryDrawerContent(
-                sessions = viewmodel.sessionSummaries.toList(),
+                sessions = viewmodel.sessionSummaries,
                 currentSessionId = viewmodel.currentSessionId,
                 statusMessage = viewmodel.historyStatusMessage,
                 onNewChat = {
+                    dismissKeyboard()
                     viewmodel.startNewChat(context)
                     scope.launch { drawerState.close() }
                 },
                 onOpenSession = { id ->
+                    dismissKeyboard()
                     viewmodel.openSession(context, id)
                     scope.launch { drawerState.close() }
                 },
                 firstName = userProfile?.firstname,
                 lastName = userProfile?.lastname,
                 onOpenAccount = {
+                    dismissKeyboard()
                     scope.launch {
                         drawerState.close()
                         navController.navigate(Routes.account)
@@ -229,7 +325,7 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
     ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = modeColor.copy(alpha = 0.06f)
+        color = if (ui.isDark) ui.chatScrim else modeColor.copy(alpha = 0.06f)
     ) {
         Column(
             modifier = Modifier
@@ -261,11 +357,12 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
             }
             val modelLogoRes = selectedProvider?.let { ProviderLogos.resFor(it.id) }
             val headerProviders = if (viewmodel.OnlineMode) {
-                viewmodel.onlineProviders ?: AiModels.providers
+                viewmodel.onlineProviders?.takeIf { it.isNotEmpty() } ?: AiModels.providers
             } else {
                 listOf(AiModels.offlineProvider)
             }
             val modelAccess = viewmodel.onlineModelAccess
+            val modelAvailability = viewmodel.onlineModelAvailability
             val freeOnlyMode = viewmodel.walletSnapshot.freeOnlyMode
             val headerSelectedModelId = if (viewmodel.OnlineMode) {
                 selectedModelId
@@ -277,6 +374,7 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
                     selectedModelId,
                     viewmodel.onlineModelImageInputSupport
                 )
+            val offlineAwaitingDownload = !viewmodel.OnlineMode && !viewmodel.isModelDownloaded
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -287,13 +385,22 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
-                        .clickable { scope.launch { drawerState.open() } },
+                        .clickable {
+                            dismissKeyboard()
+                            scope.launch {
+                                if (drawerState.isClosed) {
+                                    drawerState.open()
+                                } else {
+                                    drawerState.close()
+                                }
+                            }
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.Menu,
                         contentDescription = "Chat history",
-                        tint = Color(0xFF1C1C3A),
+                        tint = ui.iconPrimary,
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -303,7 +410,7 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
                         .weight(1f)
                         .height(44.dp)
                         .clip(RoundedCornerShape(50))
-                        .background(Color(0xFFF0F1F5))
+                        .background(ui.surfaceMuted)
                         .padding(4.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
@@ -312,11 +419,10 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
                         title = "Online",
                         selected = viewmodel.OnlineMode,
                         icon = Icons.Outlined.Language,
-                        activeColor = Color(0xFF5B4DFF),
+                        activeColor = ui.accent,
                         modifier = Modifier.weight(1f)
                     ) {
-                        viewmodel.OnlineMode = true
-                        viewmodel.refreshOnlineAccount()
+                        viewmodel.switchToOnlineMode()
                     }
 
                     ModeButton(
@@ -326,7 +432,7 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
                         activeColor = Color(0xFF00C853),
                         modifier = Modifier.weight(1f)
                     ) {
-                        viewmodel.OnlineMode = false
+                        viewmodel.switchToOfflineMode(context)
                     }
                 }
 
@@ -338,12 +444,23 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
                     providers = headerProviders,
                     selectedId = headerSelectedModelId,
                     modelAccess = modelAccess,
+                    modelAvailability = modelAvailability,
                     freeOnlyMode = freeOnlyMode,
+                    offlineModelDownloaded = viewmodel.isModelDownloaded,
+                    isOfflineModelDownloading = viewmodel.isDownloading,
                     modelPickerOpenNonce = viewmodel.modelPickerOpenNonce,
+                    onRefreshCatalog = {
+                        viewmodel.refreshOnlineAccount()
+                        viewmodel.refreshModelStatus(context)
+                    },
+                    onDownloadOfflineModel = { viewmodel.downloadModel(context) },
+                    onPickerDismissWithoutSelection = {
+                        viewmodel.clearPendingChatRetryAfterModelPick()
+                    },
                     onSelect = { modelId ->
                         if (viewmodel.OnlineMode) {
                             selectedModelId = modelId
-                            viewmodel.selectedModelId = modelId
+                            viewmodel.onOnlineModelSelected(modelId)
                         }
                     }
                 )
@@ -355,59 +472,84 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
                     .defaultMinSize(minHeight = 0.dp)
                     .padding(vertical = 14.dp)
             ) {
-                MessageList(
-                    messageList = viewmodel.messagelist,
-                    isLoading = viewmodel.loading,
-                    isModelDownloaded = viewmodel.isModelDownloaded,
-                    isOfflineMode = !viewmodel.OnlineMode,
-                    onSwitchToOffline = { viewmodel.switchToOfflineMode(context) }
-                )
+                if (!offlineAwaitingDownload) {
+                    MessageList(
+                        messageList = viewmodel.messagelist,
+                        listState = chatListState,
+                        isLoading = viewmodel.loading,
+                        isModelDownloaded = viewmodel.isModelDownloaded,
+                        isOfflineMode = !viewmodel.OnlineMode,
+                        onSwitchToOffline = { viewmodel.switchToOfflineMode(context) }
+                    )
+                }
             }
 
-
-
-            if (!viewmodel.OnlineMode && !viewmodel.isModelDownloaded) {
+            if (offlineAwaitingDownload) {
                 OfflineDownloadBanner(
                     isDownloading = viewmodel.isDownloading,
                     downloadProgress = viewmodel.downloadProgress,
-                    onDownload = { viewmodel.downloadModel(context) }
+                    onDownload = { viewmodel.downloadModel(context) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
                 )
-                Spacer(modifier = Modifier.height(12.dp))
             }
 
-            val composerBg = Color.White
-            val composerControlBg = Color(0xFFF0F1F5)
-            val composerIconTint = Color(0xFF6B6B7A)
-            val composerBorder = Color(0xFFD8D4F0)
+            val composerBg = ui.composerSurface
+            val composerControlBg = ui.composerControl
+            val composerIconTint = ui.iconMuted
+            val composerBorder = ui.composerBorder
             val sendColor by animateColorAsState(
-                if (viewmodel.OnlineMode) Color(0xFF5B4DFF) else Color(0xFF00C853),
+                if (viewmodel.OnlineMode) ui.accent else Color(0xFF00C853),
                 label = "sendColor"
             )
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .shadow(
-                        elevation = 16.dp,
-                        shape = RoundedCornerShape(28.dp),
-                        spotColor = Color(0xFF5B4DFF).copy(alpha = 0.14f),
-                        ambientColor = Color(0xFF5B4DFF).copy(alpha = 0.08f)
+                    .then(
+                        if (ui.isDark) {
+                            Modifier
+                        } else {
+                            Modifier.shadow(
+                                elevation = 16.dp,
+                                shape = RoundedCornerShape(28.dp),
+                                spotColor = ui.accent.copy(alpha = 0.14f),
+                                ambientColor = ui.accent.copy(alpha = 0.08f)
+                            )
+                        }
                     )
                     .clip(RoundedCornerShape(28.dp))
                     .background(composerBg)
                     .border(1.5.dp, composerBorder, RoundedCornerShape(28.dp))
                     .padding(horizontal = 14.dp, vertical = 14.dp)
             ) {
+                if (voiceState.showVoiceBar()) {
+                    ChatGptVoiceBar(
+                        state = voiceState,
+                        waveformBands = voiceWaveform,
+                        accentColor = sendColor,
+                        ui = ui,
+                        onCancel = { voiceViewModel.cancel() },
+                        onStopPaste = { voiceViewModel.finishPaste() },
+                        onSend = { voiceViewModel.finishSend() },
+                    )
+                } else {
                 BasicTextField(
                     value = question,
                     onValueChange = { question = it },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 28.dp),
+                        .heightIn(min = 28.dp)
+                        .onFocusChanged { focus ->
+                            if (focus.isFocused) scrollChatToEnd()
+                        },
                     textStyle = TextStyle(
                         fontSize = 16.sp,
-                        color = Color(0xFF111133),
+                        color = ui.textPrimary,
                         lineHeight = 22.sp
                     ),
+                    keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { submitQuestion() }),
                     decorationBox = { inner ->
                         Box(
                             modifier = Modifier.fillMaxWidth(),
@@ -416,7 +558,7 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
                             if (question.isEmpty()) {
                                 Text(
                                     "Ask anything…",
-                                    color = Color(0xFF9A9AAB),
+                                    color = ui.textPlaceholder,
                                     fontSize = 16.sp
                                 )
                             }
@@ -427,11 +569,36 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                viewmodel.queuedMessage?.let { queued ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(ui.composerControl)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = queued,
+                            fontSize = 13.sp,
+                            color = ui.textPrimary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { viewmodel.sendQueuedMessageNow() }) {
+                            Text("Send now", color = ui.accent, fontSize = 13.sp)
+                        }
+                    }
+                }
+
                 attachedMediaUri?.let {
                     Text(
                         text = "Media attached",
                         fontSize = 12.sp,
-                        color = Color(0xFF6B6B7A),
+                        color = ui.iconMuted,
                         modifier = Modifier.padding(bottom = 10.dp)
                     )
                 }
@@ -459,7 +626,7 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
                                 Icon(
                                     imageVector = Icons.Outlined.Add,
                                     contentDescription = "Attach media",
-                                    tint = Color(0xFF1C1C3A),
+                                    tint = ui.iconPrimary,
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
@@ -482,46 +649,63 @@ fun ChatbotScreen(viewmodel : cherryAiViewModel , navController: NavHostControll
                                 .clip(CircleShape)
                                 .background(composerControlBg)
                                 .clickable {
-                                    if (voiceState is VoiceState.Listening) voiceViewModel.stop() else if (context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) voiceViewModel.start() else micPermission.launch(android.Manifest.permission.RECORD_AUDIO)
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (voiceState is VoiceState.Listening) Icons.Outlined.Close else Icons.Outlined.Mic,
-                                contentDescription = if (voiceState is VoiceState.Listening) "Stop voice input" else "Start voice input",
-                                tint = composerIconTint,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (question.isNotBlank()) sendColor
-                                    else sendColor.copy(alpha = 0.45f)
-                                )
-                                .clickable(enabled = question.isNotBlank()) {
-                                    viewmodel.initChatHistory(context)
-                                    if (viewmodel.OnlineMode) {
-                                        viewmodel.sendmessage(question)
-                                        question = ""
+                                    if (context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                        voiceViewModel.start()
                                     } else {
-                                        viewmodel.sendMessageOffline(question)
-                                        question = ""
+                                        micPermission.launch(android.Manifest.permission.RECORD_AUDIO)
                                     }
                                 },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.ArrowUpward,
-                                contentDescription = "Send",
-                                tint = Color.White,
+                                imageVector = Icons.Outlined.Mic,
+                                contentDescription = "Start voice input",
+                                tint = composerIconTint,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
+
+                        val isGenerating = viewmodel.loading
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        isGenerating -> sendColor
+                                        question.isNotBlank() -> sendColor
+                                        else -> sendColor.copy(alpha = 0.45f)
+                                    }
+                                )
+                                .clickable(
+                                    enabled = isGenerating || question.isNotBlank()
+                                ) {
+                                    if (isGenerating) {
+                                        viewmodel.stopCurrentChat()
+                                    } else {
+                                        submitQuestion()
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isGenerating) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(Color.White)
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Outlined.ArrowUpward,
+                                    contentDescription = "Send",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
                     }
+                }
                 }
             }
 
@@ -739,14 +923,29 @@ fun HeaderModelSelector(
     providers: List<AiProvider>,
     selectedId: String,
     modelAccess: Map<String, Boolean>?,
+    modelAvailability: Map<String, Boolean>?,
     freeOnlyMode: Boolean,
+    offlineModelDownloaded: Boolean = true,
+    isOfflineModelDownloading: Boolean = false,
     modelPickerOpenNonce: Int = 0,
+    onRefreshCatalog: () -> Unit = {},
+    onDownloadOfflineModel: () -> Unit = {},
+    onPickerDismissWithoutSelection: () -> Unit = {},
     onSelect: (String) -> Unit
 ) {
     var showPicker by remember { mutableStateOf(false) }
+    var skipDismissClear by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     LaunchedEffect(modelPickerOpenNonce) {
         if (modelPickerOpenNonce > 0) showPicker = true
+    }
+    LaunchedEffect(showPicker) {
+        if (showPicker) {
+            onRefreshCatalog()
+        } else if (!skipDismissClear) {
+            onPickerDismissWithoutSelection()
+        }
+        skipDismissClear = false
     }
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -781,9 +980,15 @@ fun HeaderModelSelector(
             providers = providers,
             selectedId = selectedId,
             modelAccess = modelAccess,
+            modelAvailability = modelAvailability,
+            catalogLoaded = providers.isNotEmpty() || modelAccess != null,
             freeOnlyMode = freeOnlyMode,
+            offlineModelDownloaded = offlineModelDownloaded,
+            isOfflineModelDownloading = isOfflineModelDownloading,
+            onDownloadOfflineModel = onDownloadOfflineModel,
             onDismiss = { showPicker = false },
             onSelect = { modelId ->
+                skipDismissClear = true
                 onSelect(modelId)
                 showPicker = false
             }
@@ -872,13 +1077,20 @@ fun ModelProviderSheet(
     providers: List<AiProvider>,
     selectedId: String,
     modelAccess: Map<String, Boolean>?,
+    modelAvailability: Map<String, Boolean>?,
+    catalogLoaded: Boolean,
     freeOnlyMode: Boolean,
+    offlineModelDownloaded: Boolean = true,
+    isOfflineModelDownloading: Boolean = false,
+    onDownloadOfflineModel: () -> Unit = {},
     onDismiss: () -> Unit,
     onSelect: (String) -> Unit
 ) {
     val context = LocalContext.current
     var searchQuery by rememberSaveable { mutableStateOf("") }
-    var onlyIncludedModels by rememberSaveable { mutableStateOf(false) }
+    var onlyIncludedModels by remember(context) {
+        mutableStateOf(ModelPickerPreferences.onlyIncludedModels(context))
+    }
     val sortedStandalone = remember(standaloneModels) {
         AiModels.sortStandaloneCatalog(standaloneModels)
     }
@@ -942,6 +1154,13 @@ fun ModelProviderSheet(
                 fontSize = 14.sp,
                 color = Color(0xFF8A8A98)
             )
+            Text(
+                text = "Upgrade-locked models stay visible. Names and pricing sync from OpenRouter when you open this list.",
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                color = Color(0xFFADADB8),
+                modifier = Modifier.padding(top = 4.dp)
+            )
             Spacer(modifier = Modifier.height(16.dp))
 
             Row(
@@ -998,13 +1217,36 @@ fun ModelProviderSheet(
 
             val listEmpty = visibleStandalone.isEmpty() && visibleProviders.isEmpty()
             val noSearchResults = searchActive && listEmpty
+            val catalogLoading = !catalogLoaded && listEmpty && !searchActive
 
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
             ) {
-                if (noSearchResults) {
+                if (catalogLoading) {
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(horizontal = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Syncing live models…",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 16.sp,
+                            color = Color(0xFF1A1A3A)
+                        )
+                        Text(
+                            text = "Only models OpenRouter reports as available are shown.",
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                            color = Color(0xFF8A8A98),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                } else if (noSearchResults) {
                     ModelPickerNoResults(
                         query = searchQuery.trim(),
                         modifier = Modifier
@@ -1022,28 +1264,32 @@ fun ModelProviderSheet(
 
                 autoModel?.let { model ->
                     val allowed = AiModels.isModelAllowed(model.id, modelAccess)
+                    val live = AiModels.isOpenRouterAvailable(model.id, modelAvailability)
                     ProviderModelRow(
                         model = model,
                         selected = model.id == selectedId,
                         allowed = allowed,
+                        openRouterAvailable = live,
                         freeOnlyMode = freeOnlyMode,
                         showTierLabel = false,
                         onClick = {
-                            if (allowed) {
-                                onSelect(model.id)
-                            } else {
-                                android.widget.Toast.makeText(
-                                    context,
-                                    AiModels.lockLabel(model.minTier, freeOnlyMode),
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                            }
+                            handleModelSelection(
+                                context = context,
+                                model = model,
+                                allowed = allowed,
+                                openRouterAvailable = live,
+                                freeOnlyMode = freeOnlyMode,
+                                onSelect = onSelect
+                            )
                         }
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     ModelPickerPlanFilterToggle(
                         checked = onlyIncludedModels,
-                        onCheckedChange = { onlyIncludedModels = it }
+                        onCheckedChange = { enabled ->
+                            onlyIncludedModels = enabled
+                            ModelPickerPreferences.setOnlyIncludedModels(context, enabled)
+                        }
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                 }
@@ -1051,7 +1297,10 @@ fun ModelProviderSheet(
                 if (autoModel == null) {
                     ModelPickerPlanFilterToggle(
                         checked = onlyIncludedModels,
-                        onCheckedChange = { onlyIncludedModels = it }
+                        onCheckedChange = { enabled ->
+                            onlyIncludedModels = enabled
+                            ModelPickerPreferences.setOnlyIncludedModels(context, enabled)
+                        }
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                 }
@@ -1067,22 +1316,23 @@ fun ModelProviderSheet(
 
                 otherStandalone.forEach { model ->
                     val allowed = AiModels.isModelAllowed(model.id, modelAccess)
+                    val live = AiModels.isOpenRouterAvailable(model.id, modelAvailability)
                     ProviderModelRow(
                         model = model,
                         selected = model.id == selectedId,
                         allowed = allowed,
+                        openRouterAvailable = live,
                         freeOnlyMode = freeOnlyMode,
                         showTierLabel = model.id != AiModels.auto.id,
                         onClick = {
-                            if (allowed) {
-                                onSelect(model.id)
-                            } else {
-                                android.widget.Toast.makeText(
-                                    context,
-                                    AiModels.lockLabel(model.minTier, freeOnlyMode),
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                            }
+                            handleModelSelection(
+                                context = context,
+                                model = model,
+                                allowed = allowed,
+                                openRouterAvailable = live,
+                                freeOnlyMode = freeOnlyMode,
+                                onSelect = onSelect
+                            )
                         }
                     )
                     Spacer(modifier = Modifier.height(10.dp))
@@ -1093,7 +1343,11 @@ fun ModelProviderSheet(
                         provider = provider,
                         selectedId = selectedId,
                         modelAccess = modelAccess,
+                        modelAvailability = modelAvailability,
                         freeOnlyMode = freeOnlyMode,
+                        offlineModelDownloaded = offlineModelDownloaded,
+                        isOfflineModelDownloading = isOfflineModelDownloading,
+                        onDownloadOfflineModel = onDownloadOfflineModel,
                         expanded = searchActive || expandedProviderId == provider.id,
                         onToggle = {
                             if (!searchActive) {
@@ -1117,7 +1371,11 @@ fun ProviderAccordion(
     provider: AiProvider,
     selectedId: String,
     modelAccess: Map<String, Boolean>?,
+    modelAvailability: Map<String, Boolean>?,
     freeOnlyMode: Boolean,
+    offlineModelDownloaded: Boolean = true,
+    isOfflineModelDownloading: Boolean = false,
+    onDownloadOfflineModel: () -> Unit = {},
     expanded: Boolean,
     onToggle: () -> Unit,
     onSelect: (String) -> Unit
@@ -1191,21 +1449,26 @@ fun ProviderAccordion(
             ) {
                 provider.models.forEach { model ->
                     val allowed = AiModels.isModelAllowed(model.id, modelAccess)
+                    val live = AiModels.isOpenRouterAvailable(model.id, modelAvailability)
                     ProviderModelRow(
                         model = model,
                         selected = model.id == selectedId,
                         allowed = allowed,
+                        openRouterAvailable = live,
                         freeOnlyMode = freeOnlyMode,
+                        offlineModelDownloaded = offlineModelDownloaded,
+                        isOfflineModelDownloading = isOfflineModelDownloading,
+                        onDownloadOfflineModel = onDownloadOfflineModel,
                         onClick = {
-                            if (allowed) {
-                                onSelect(model.id)
-                            } else {
-                                android.widget.Toast.makeText(
-                                    context,
-                                    AiModels.lockLabel(model.minTier, freeOnlyMode),
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                            }
+                            handleModelSelection(
+                                context = context,
+                                model = model,
+                                allowed = allowed,
+                                openRouterAvailable = live,
+                                freeOnlyMode = freeOnlyMode,
+                                offlineModelDownloaded = offlineModelDownloaded,
+                                onSelect = onSelect
+                            )
                         }
                     )
                 }
@@ -1219,79 +1482,157 @@ fun ProviderModelRow(
     model: AiModelOption,
     selected: Boolean,
     allowed: Boolean,
+    openRouterAvailable: Boolean = true,
     freeOnlyMode: Boolean,
     showTierLabel: Boolean = true,
+    offlineModelDownloaded: Boolean = true,
+    isOfflineModelDownloading: Boolean = false,
+    onDownloadOfflineModel: () -> Unit = {},
     onClick: () -> Unit
 ) {
     val accent = Color(0xFF5B4DFF)
+    val offlineGreen = Color(0xFF00C853)
     val muted = Color(0xFFB0B0BC)
+    val isLocal = AiModels.isLocalModel(model.id)
+    val enabled = when {
+        isLocal -> offlineModelDownloaded
+        else -> allowed && openRouterAvailable
+    }
+    val showSelectedChrome = selected && (!isLocal || offlineModelDownloaded)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(
                 when {
-                    selected -> Color.White
-                    !allowed -> Color(0xFFF3F3F6)
+                    showSelectedChrome -> Color.White
+                    !enabled -> Color(0xFFF3F3F6)
                     else -> Color.White.copy(alpha = 0.7f)
                 }
             )
             .border(
-                width = if (selected) 1.5.dp else 1.dp,
-                color = if (selected) accent else Color(0xFFE8E8F0),
+                width = if (showSelectedChrome) 1.5.dp else 1.dp,
+                color = if (showSelectedChrome) accent else Color(0xFFE8E8F0),
                 shape = RoundedCornerShape(16.dp)
             )
-            .clickable(onClick = onClick)
+            .then(
+                if (isLocal && !offlineModelDownloaded) {
+                    Modifier
+                } else {
+                    Modifier.clickable(onClick = onClick)
+                }
+            )
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = model.displayName,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                fontWeight = if (showSelectedChrome) FontWeight.SemiBold else FontWeight.Medium,
                 fontSize = 15.sp,
-                color = if (allowed) Color(0xFF1A1A3A) else muted
+                color = if (enabled) Color(0xFF1A1A3A) else muted
             )
-            if (showTierLabel || !allowed) {
-                Text(
-                    text = if (allowed) {
-                        AiModels.tierLabel(model.minTier)
-                    } else {
-                        AiModels.lockLabel(model.minTier, freeOnlyMode)
-                    },
-                    fontSize = 12.sp,
-                    color = if (allowed) Color(0xFF8A8A98) else Color(0xFFE57373)
-                )
+            when {
+                isLocal && !offlineModelDownloaded -> {
+                    Text(
+                        text = if (isOfflineModelDownloading) {
+                            "Downloading…"
+                        } else {
+                            "Download to chat offline"
+                        },
+                        fontSize = 12.sp,
+                        color = Color(0xFF8A8A98)
+                    )
+                }
+                showTierLabel || !allowed || !openRouterAvailable -> {
+                    Text(
+                        text = when {
+                            !openRouterAvailable -> "Temporarily unavailable on OpenRouter"
+                            !allowed -> AiModels.lockLabel(model.minTier, freeOnlyMode)
+                            else -> AiModels.tierLabel(model.minTier)
+                        },
+                        fontSize = 12.sp,
+                        color = when {
+                            !openRouterAvailable -> Color(0xFF8A8A98)
+                            !allowed -> Color(0xFFE57373)
+                            else -> Color(0xFF8A8A98)
+                        }
+                    )
+                }
             }
         }
-        if (!allowed) {
-            Icon(
-                imageVector = Icons.Outlined.Lock,
-                contentDescription = "Locked",
-                tint = muted,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-        }
-        Box(
-            modifier = Modifier
-                .size(22.dp)
-                .border(
-                    width = 2.dp,
-                    color = if (selected) accent else Color(0xFFC8C8D4),
-                    shape = CircleShape
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            if (selected) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(accent)
+        if (isLocal && !offlineModelDownloaded) {
+            IconButton(
+                onClick = onDownloadOfflineModel,
+                enabled = !isOfflineModelDownloading,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Download,
+                    contentDescription = "Download offline model",
+                    tint = offlineGreen,
+                    modifier = Modifier.size(22.dp)
                 )
             }
+        } else {
+            if (!allowed && !isLocal) {
+                Icon(
+                    imageVector = Icons.Outlined.Lock,
+                    contentDescription = "Locked",
+                    tint = muted,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .border(
+                        width = 2.dp,
+                        color = if (showSelectedChrome) accent else Color(0xFFC8C8D4),
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (showSelectedChrome) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(accent)
+                    )
+                }
+            }
         }
+    }
+}
+
+private fun handleModelSelection(
+    context: android.content.Context,
+    model: AiModelOption,
+    allowed: Boolean,
+    openRouterAvailable: Boolean,
+    freeOnlyMode: Boolean,
+    offlineModelDownloaded: Boolean = true,
+    onSelect: (String) -> Unit,
+) {
+    if (AiModels.isLocalModel(model.id) && !offlineModelDownloaded) return
+    when {
+        !allowed -> {
+            android.widget.Toast.makeText(
+                context,
+                AiModels.lockLabel(model.minTier, freeOnlyMode),
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+        }
+        !openRouterAvailable -> {
+            android.widget.Toast.makeText(
+                context,
+                "This model is temporarily unavailable on OpenRouter.",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+        }
+        else -> onSelect(model.id)
     }
 }
 
@@ -1621,24 +1962,13 @@ fun OfflineDownloadBanner(
     onDownload: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val bannerScroll = rememberScrollState()
-    val screenHeightDp = LocalConfiguration.current.screenHeightDp
-    val reservedVerticalSpaceDp = 300
-    val maxBannerHeight = (screenHeightDp - reservedVerticalSpaceDp).coerceAtLeast(180).dp
-
     Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(max = maxBannerHeight),
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .verticalScroll(bannerScroll)
-                .padding(20.dp)
-        ) {
+        Column(modifier = Modifier.padding(20.dp)) {
             Row {
                 Box(
                     modifier = Modifier
@@ -1766,120 +2096,62 @@ fun OfflineDownloadBanner(
     }
 }
 
+private suspend fun LazyListState.scrollChatToEnd(messageCount: Int, isLoading: Boolean) {
+    val lastIndex = messageCount - 1 + if (isLoading) 1 else 0
+    if (lastIndex >= 0) scrollToItem(lastIndex)
+}
+
 @Composable
 fun MessageList(
     messageList: List<Response>,
+    listState: LazyListState = rememberLazyListState(),
     isLoading: Boolean = false,
     isModelDownloaded: Boolean = false,
     isOfflineMode: Boolean = false,
     onSwitchToOffline: () -> Unit = {}
 ) {
-    val listState = rememberLazyListState()
+    val ui = cherryUiColors()
 
-    LaunchedEffect(messageList.size, isLoading) {
-        val lastIndex = messageList.lastIndex + if (isLoading) 1 else 0
-        if (lastIndex < 0) return@LaunchedEffect
-
-        val layout = listState.layoutInfo
-        val allItemsFitInViewport = layout.totalItemsCount > 0 &&
-            layout.visibleItemsInfo.size >= layout.totalItemsCount
-
-        if (allItemsFitInViewport) {
-            // Avoid scroll-to-last padding that spreads messages apart when the list is short.
-            listState.scrollToItem(0)
-        } else {
-            listState.animateScrollToItem(lastIndex)
-        }
+    LaunchedEffect(messageList.size, isLoading, messageList.lastOrNull()?.message) {
+        listState.scrollChatToEnd(messageList.size, isLoading)
     }
 
-    val assistantBubbleBorder = Color(0xFFD5D3E6)
+    val assistantBubbleBorder = ui.assistantBubbleBorder
     val bubbleTextStyle = TextStyle(
         fontSize = 15.sp,
         lineHeight = 22.sp,
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
+    val context = LocalContext.current
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         state = listState,
         contentPadding = PaddingValues(vertical = 4.dp)
     ) {
-        items(messageList) { message ->
-            val isUser = message.Role == "User"
-            val isLimitMessage = message.isLimitExhaustedMessage()
-            val textColor = if (isUser) Color.White else Color(0xFF111133)
-            val maxBubbleWidth = (LocalConfiguration.current.screenWidthDp * 0.82f).dp
-            val bubbleShape = RoundedCornerShape(
-                topStart = 20.dp,
-                topEnd = 20.dp,
-                bottomStart = if (isUser) 20.dp else 6.dp,
-                bottomEnd = if (isUser) 6.dp else 20.dp
+        itemsIndexed(
+            items = messageList,
+            key = { index, message ->
+                "${index}_${message.Role}_${message.message.hashCode()}"
+            },
+            contentType = { _, message -> message.Role }
+        ) { _, message ->
+            ChatMessageRow(
+                message = message,
+                screenWidthDp = screenWidthDp,
+                bubbleTextStyle = bubbleTextStyle,
+                assistantBubbleBorder = assistantBubbleBorder,
+                ui = ui,
+                isOfflineMode = isOfflineMode,
+                isModelDownloaded = isModelDownloaded,
+                onSwitchToOffline = onSwitchToOffline,
+                context = context
             )
-            val displayText = message.message.trim()
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement =
-                        if (isUser) Arrangement.End else Arrangement.Start
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .widthIn(max = maxBubbleWidth)
-                            .then(
-                                if (!isUser) {
-                                    Modifier.border(1.dp, assistantBubbleBorder, bubbleShape)
-                                } else {
-                                    Modifier
-                                }
-                            )
-                            .clip(bubbleShape)
-                            .background(
-                                if (isUser)
-                                    Brush.horizontalGradient(
-                                        listOf(Color(0xFF5B4DFF), Color(0xFF7B61FF))
-                                    )
-                                else
-                                    Brush.verticalGradient(
-                                        listOf(Color.White, Color(0xFFF9F9FD))
-                                    )
-                            )
-                            .padding(horizontal = 14.dp, vertical = 10.dp)
-                    ) {
-                        if (isUser) {
-                            Text(
-                                text = displayText,
-                                color = textColor,
-                                style = bubbleTextStyle,
-                                softWrap = true
-                            )
-                        } else {
-                            AssistantMarkdownContent(
-                                markdown = displayText,
-                                textColor = textColor,
-                                linkColor = Color(0xFF5B4DFF),
-                                baseStyle = bubbleTextStyle,
-                                codeBackgroundHint = Color(0xFFE0E0EA)
-                            )
-                        }
-                    }
-                }
-
-                if (isLimitMessage && !isOfflineMode) {
-                    OfflineLimitCard(
-                        isModelDownloaded = isModelDownloaded,
-                        onUseOffline = onSwitchToOffline
-                    )
-                }
-            }
         }
 
         if (isLoading) {
-            item {
+            item(key = "typing_indicator", contentType = "typing") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1892,6 +2164,15 @@ fun MessageList(
                         bottomStart = 6.dp,
                         bottomEnd = 20.dp
                     )
+                    if (ui.assistantPlainOnDark) {
+                        Box(
+                            modifier = Modifier
+                                .widthIn(max = (LocalConfiguration.current.screenWidthDp * 0.82f).dp)
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                        ) {
+                            TypingIndicator(accent = ui.accent)
+                        }
+                    } else {
                     Box(
                         modifier = Modifier
                             .widthIn(max = (LocalConfiguration.current.screenWidthDp * 0.82f).dp)
@@ -1899,15 +2180,136 @@ fun MessageList(
                             .clip(typingShape)
                             .background(
                                 Brush.verticalGradient(
-                                    listOf(Color.White, Color(0xFFF9F9FD))
+                                    listOf(ui.assistantBubbleStart, ui.assistantBubbleEnd)
                                 )
                             )
                             .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
-                        TypingIndicator()
+                        TypingIndicator(accent = ui.accent)
+                    }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ChatMessageRow(
+    message: Response,
+    screenWidthDp: Int,
+    bubbleTextStyle: TextStyle,
+    assistantBubbleBorder: Color,
+    ui: CherryUiColors,
+    isOfflineMode: Boolean,
+    isModelDownloaded: Boolean,
+    onSwitchToOffline: () -> Unit,
+    context: Context
+) {
+    val isUser = message.Role == "User"
+    val isLimitMessage = message.isLimitExhaustedMessage()
+    val textColor = if (isUser) Color.White else ui.textPrimary
+    val maxBubbleWidth = (screenWidthDp * if (isUser) 0.82f else 0.96f).dp
+    val bubbleShape = RoundedCornerShape(
+        topStart = 20.dp,
+        topEnd = 20.dp,
+        bottomStart = if (isUser) 20.dp else 6.dp,
+        bottomEnd = if (isUser) 6.dp else 20.dp
+    )
+    val displayText = message.message.trim()
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement =
+                if (isUser) Arrangement.End else Arrangement.Start
+        ) {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = maxBubbleWidth)
+                    .then(
+                        if (!isUser && !ui.assistantPlainOnDark) {
+                            Modifier.border(1.dp, assistantBubbleBorder, bubbleShape)
+                        } else if (isUser) {
+                            Modifier
+                        } else {
+                            Modifier
+                        }
+                    )
+                    .clip(bubbleShape)
+                    .background(
+                        when {
+                            isUser -> Brush.horizontalGradient(
+                                listOf(ui.userBubbleStart, ui.userBubbleEnd)
+                            )
+                            ui.assistantPlainOnDark -> Brush.linearGradient(
+                                listOf(Color.Transparent, Color.Transparent)
+                            )
+                            else -> Brush.verticalGradient(
+                                listOf(ui.assistantBubbleStart, ui.assistantBubbleEnd)
+                            )
+                        }
+                    )
+                    .padding(horizontal = if (!isUser && ui.assistantPlainOnDark) 0.dp else 14.dp, vertical = 10.dp)
+            ) {
+                if (isUser) {
+                    Text(
+                        text = displayText,
+                        color = textColor,
+                        style = bubbleTextStyle,
+                        softWrap = true
+                    )
+                } else {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        AssistantMarkdownContent(
+                            markdown = displayText,
+                            textColor = textColor,
+                            linkColor = ui.link,
+                            baseStyle = bubbleTextStyle,
+                            codeBackgroundHint = ui.codeBackground
+                        )
+                        if (displayText.isNotBlank()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        val clipboard =
+                                            context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        clipboard.setPrimaryClip(
+                                            ClipData.newPlainText("Assistant reply", displayText)
+                                        )
+                                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.ContentCopy,
+                                        contentDescription = "Copy response",
+                                        tint = ui.iconMuted,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (isLimitMessage && !isOfflineMode) {
+            OfflineLimitCard(
+                isModelDownloaded = isModelDownloaded,
+                onUseOffline = onSwitchToOffline
+            )
         }
     }
 }
@@ -2031,7 +2433,7 @@ fun OfflineLimitCard(
     }
 }
 @Composable
-fun TypingIndicator() {
+fun TypingIndicator(accent: Color = Color(0xFF5B4DFF)) {
     val dotCount = 3
     val infiniteTransition = rememberInfiniteTransition(label = "typing")
 
@@ -2065,7 +2467,7 @@ fun TypingIndicator() {
                     .size(7.dp)
                     .offset(y = offset.value.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF5B4DFF).copy(alpha = 0.5f))
+                    .background(accent.copy(alpha = 0.5f))
             )
         }
     }

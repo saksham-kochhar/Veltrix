@@ -24,6 +24,7 @@ data class WalletSnapshot(
     val monthlyAlertMessage: String = "",
     val periodEnd: String = "",
     val limitBlockReason: String = "none",
+    val creditsUnlockAt: String = "",
 ) {
     companion object {
         fun fromJson(obj: JSONObject): WalletSnapshot = WalletSnapshot(
@@ -51,6 +52,7 @@ data class WalletSnapshot(
             monthlyAlertMessage = obj.optString("monthly_alert_message", ""),
             periodEnd = obj.optString("period_end", ""),
             limitBlockReason = obj.optString("limit_block_reason", "none"),
+            creditsUnlockAt = obj.optString("credits_unlock_at", ""),
         )
     }
 }

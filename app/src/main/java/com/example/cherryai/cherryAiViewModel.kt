@@ -22,7 +22,10 @@ import com.example.cherryai.chathistorry.ChatHistoryStore
 import com.example.cherryai.chathistorry.ChatSession
 import com.example.cherryai.chathistorry.ChatSessionSummary
 import com.example.cherryai.chathistorry.PROFILE_CHAT_BATCH
+import com.example.cherryai.chathistorry.PROFILE_MERGE_INSTRUCTION
 import com.example.cherryai.chathistorry.PROFILE_SUMMARY_MAX_WORDS
+import com.example.cherryai.chathistorry.profileContextForNewChat
+import com.example.cherryai.chathistorry.buildStructuredProfileContext
 import com.example.cherryai.chathistorry.SUMMARY_INSTRUCTION
 import com.example.cherryai.chathistorry.TITLE_INSTRUCTION
 import com.example.cherryai.chathistorry.buildInitialTitlePrompt
@@ -39,7 +42,6 @@ import com.example.cherryai.chathistorry.needsInitialTitle
 import com.example.cherryai.chathistorry.sanitizeSummary
 import com.example.cherryai.chathistorry.sanitizeTitle
 import com.example.cherryai.chathistorry.shouldCompact
-import com.example.cherryai.chathistorry.shouldRefreshProfile
 import com.example.cherryai.chathistorry.toSummary
 import com.example.cherryai.chathistorry.unsummarizedTail
 import com.example.cherryai.security.DeviceSession
@@ -63,14 +65,19 @@ import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.Timestamp
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import java.io.File
 import java.util.UUID
 import org.json.JSONObject
@@ -137,6 +144,19 @@ class cherryAiViewModel : ViewModel(){
     }
     var loading by mutableStateOf(false)
 
+    /** Next message to send once the user taps Send now while a reply is in flight. */
+    var queuedMessage by mutableStateOf<String?>(null)
+        private set
+
+    /** User message to resend after picking a replacement model from the unavailable dialog. */
+    private var pendingRetryQuestionAfterModelPick: String? = null
+
+    private var chatJob: Job? = null
+    private var chatGenerationId = 0
+
+    @Volatile
+    private var activeChatConnection: java.net.HttpURLConnection? = null
+
     var chatMode by mutableStateOf(ChatMode.Normal)
         private set
 
@@ -163,7 +183,10 @@ class cherryAiViewModel : ViewModel(){
     var pendingUsageAlert by mutableStateOf<UsageAlertPrompt?>(null)
         private set
 
-    var pendingModelUnavailable by mutableStateOf<String?>(null)
+    var pendingChatDialogMessage by mutableStateOf<String?>(null)
+        private set
+
+    var pendingChatDialogTitle by mutableStateOf<String?>(null)
         private set
 
     var modelPickerOpenNonce by mutableStateOf(0)
@@ -171,6 +194,10 @@ class cherryAiViewModel : ViewModel(){
 
     /** Catalog model id -> server allowed (null = not loaded yet). */
     var onlineModelAccess by mutableStateOf<Map<String, Boolean>?>(null)
+        private set
+
+    /** Catalog model id -> live on OpenRouter (merged with client health; null = not loaded). */
+    var onlineModelAvailability by mutableStateOf<Map<String, Boolean>?>(null)
         private set
 
     /** Catalog model id -> supports image input according to /v1/models/OpenRouter metadata. */
@@ -184,6 +211,15 @@ class cherryAiViewModel : ViewModel(){
     companion object {
         private const val BACKEND_BASE = "https://veltrix-backend-nmvy.onrender.com"
         private const val TAG = "ChatHistorySync"
+        private const val GENERIC_CHAT_ERROR = "Something went wrong."
+        /** Qwen task bundle: input + output must stay below this (MediaPipe maxTokens). */
+        private const val OFFLINE_MODEL_MAX_TOKENS = 512
+        private const val OFFLINE_RESERVED_OUTPUT_TOKENS = 128
+        private const val OFFLINE_MAX_PROMPT_TOKENS =
+            OFFLINE_MODEL_MAX_TOKENS - OFFLINE_RESERVED_OUTPUT_TOKENS
+        private const val OFFLINE_CONTEXT_TOO_LONG =
+            "This message is too long for the on-device model (512-token limit). " +
+                "Start a new chat or send a shorter message to continue offline."
     }
 
     var currentSessionId by mutableStateOf(UUID.randomUUID().toString())
@@ -231,13 +267,32 @@ class cherryAiViewModel : ViewModel(){
                 onlineModelAccess = access
                 onlineModelImageInputSupport = models.imageInputSupport
                 onlineProviders = models.providers
-                if (OnlineMode && access.isNotEmpty() && !AiModels.isModelAllowed(selectedModelId, access)) {
-                    selectedModelId = when {
-                        AiModels.isModelAllowed(AiModels.DEFAULT_ONLINE_ID, access) -> AiModels.DEFAULT_ONLINE_ID
-                        else -> access.entries.firstOrNull { it.value }?.key ?: AiModels.DEFAULT_ONLINE_ID
+                val ctx = historyAppContext ?: profileStorageContext
+                if (ctx != null) {
+                    ModelAvailabilityStore.pruneExpired(ctx)
+                    models.serverAvailability.forEach { (id, live) ->
+                        if (live) ModelAvailabilityStore.clear(ctx, id)
                     }
                 }
+                onlineModelAvailability = ModelAvailabilityStore.mergeWithServer(ctx, models.serverAvailability)
+                if (OnlineMode) {
+                    reconcileSelectedOnlineModel()
+                }
             }
+        }
+    }
+
+    private fun reconcileSelectedOnlineModel() {
+        val access = onlineModelAccess
+        val availability = onlineModelAvailability
+        val providers = onlineProviders ?: return
+        if (!AiModels.isSelectableOnlineModel(selectedModelId, access, availability)) {
+            selectedModelId = AiModels.firstSelectableModelId(
+                AiModels.standaloneOnline,
+                providers,
+                access,
+                availability
+            ) ?: AiModels.DEFAULT_ONLINE_ID
         }
     }
 
@@ -255,6 +310,7 @@ class cherryAiViewModel : ViewModel(){
 
     private data class OnlineModelMetadata(
         val access: Map<String, Boolean>,
+        val serverAvailability: Map<String, Boolean>,
         val imageInputSupport: Map<String, Boolean>,
         val providers: List<AiProvider>
     )
@@ -269,15 +325,18 @@ class cherryAiViewModel : ViewModel(){
         }
         val body = connection.inputStream.bufferedReader().readText()
         val root = org.json.JSONObject(body)
-        val arr = root.optJSONArray("models") ?: return OnlineModelMetadata(emptyMap(), emptyMap(), emptyList())
+        val arr = root.optJSONArray("models") ?: return OnlineModelMetadata(emptyMap(), emptyMap(), emptyMap(), emptyList())
         val access = mutableMapOf<String, Boolean>()
+        val serverAvailability = mutableMapOf<String, Boolean>()
         val imageInputSupport = mutableMapOf<String, Boolean>()
         val modelsByProvider = linkedMapOf<String, MutableList<AiModelOption>>()
         for (i in 0 until arr.length()) {
             val obj = arr.optJSONObject(i) ?: continue
             val id = obj.optString("id")
             if (id.isBlank()) continue
-            access[id] = obj.optBoolean("allowed", false)
+            val allowed = obj.optBoolean("allowed", false)
+            access[id] = allowed
+            serverAvailability[id] = AiModels.readOpenRouterAvailability(obj)
             imageInputSupport[id] = modelSupportsImageInput(obj)
             val providerId = id.substringBefore('/', missingDelimiterValue = "openrouter")
             val providerName = providerId
@@ -306,7 +365,7 @@ class cherryAiViewModel : ViewModel(){
                 models = models.sortedBy { it.displayName.lowercase() }
             )
         }.sortedBy { it.displayName.lowercase() }
-        return OnlineModelMetadata(access, imageInputSupport, providers)
+        return OnlineModelMetadata(access, serverAvailability, imageInputSupport, providers)
     }
 
     private fun providerName(id: String): String = id
@@ -356,13 +415,49 @@ class cherryAiViewModel : ViewModel(){
         }
     }
 
+    fun clearChatDialog() {
+        pendingChatDialogMessage = null
+        pendingChatDialogTitle = null
+        clearPendingChatRetryAfterModelPick()
+    }
+
     fun clearModelUnavailable() {
-        pendingModelUnavailable = null
+        clearChatDialog()
     }
 
     fun requestOpenModelPicker() {
-        pendingModelUnavailable = null
+        clearChatDialog()
+        pendingRetryQuestionAfterModelPick = messagelist.lastOrNull()
+            ?.takeIf { it.Role == "User" }
+            ?.message
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
         modelPickerOpenNonce++
+    }
+
+    fun clearPendingChatRetryAfterModelPick() {
+        pendingRetryQuestionAfterModelPick = null
+    }
+
+    fun onOnlineModelSelected(modelId: String) {
+        selectedModelId = modelId
+        val question = pendingRetryQuestionAfterModelPick
+        pendingRetryQuestionAfterModelPick = null
+        if (!question.isNullOrBlank()) {
+            sendOnlineChat(question, appendUserMessage = false)
+        }
+    }
+
+    private fun showChatDialog(message: String, title: String? = null) {
+        pendingChatDialogTitle = title
+        pendingChatDialogMessage = message
+    }
+
+    private fun showOfflineDownloadFailedDialog() {
+        showChatDialog(
+            message = "Could not download the offline model. Check your connection and try again on Wi‑Fi.",
+            title = "Download failed"
+        )
     }
 
     private fun ingestChatErrorPayload(raw: String) {
@@ -374,27 +469,128 @@ class cherryAiViewModel : ViewModel(){
             else -> obj.optString("code")
         }
         if (code == "model_unavailable") {
-            val message = when (detailObj) {
-                is org.json.JSONObject -> detailObj.optString("detail")
-                is String -> detailObj
-                else -> ""
+            if (AiModels.isAutoSelection(selectedModelId)) return
+            historyAppContext?.let { ModelAvailabilityStore.markUnavailable(it, selectedModelId) }
+            onlineModelAvailability = onlineModelAvailability?.toMutableMap()?.apply {
+                this[selectedModelId] = false
+            } ?: mapOf(selectedModelId to false)
+            reconcileSelectedOnlineModel()
+        }
+    }
+
+    private fun readHttpErrorBody(connection: java.net.HttpURLConnection): String? {
+        return connection.errorStream?.bufferedReader()?.use { it.readText() }
+            ?.takeIf { it.isNotBlank() }
+    }
+
+    private fun isSafeUserFacingApiMessage(text: String): Boolean {
+        if (text.length > 600) return false
+        val lower = text.lowercase()
+        return !lower.contains("<!doctype") &&
+            !lower.contains("<html") &&
+            !lower.contains("@font-face") &&
+            !lower.contains("data:font/")
+    }
+
+    private fun parseChatErrorFromBody(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        ingestChatErrorPayload(raw)
+        val obj = runCatching { org.json.JSONObject(raw) }.getOrNull()
+        val detail = when (val field = obj?.opt("detail")) {
+            is org.json.JSONObject -> {
+                field.optString("detail").ifBlank { field.optString("message") }
             }
-            pendingModelUnavailable = message.ifBlank {
-                "This model isn't available right now. Choose another model."
+            is String -> field
+            else -> obj?.optString("detail")
+        }
+        return detail?.takeIf { it.isNotBlank() && isSafeUserFacingApiMessage(it) }
+    }
+
+    private fun inferCreditUnlockIso(reason: String, periodEnd: String): String {
+        val utc = java.time.ZoneOffset.UTC
+        val now = java.time.ZonedDateTime.now(utc)
+        return when (reason) {
+            "12h_credits" -> {
+                val unlock = if (now.hour < 12) {
+                    now.withHour(12).withMinute(0).withSecond(0).withNano(0)
+                } else {
+                    now.plusDays(1).withHour(0).withMinute(0).withSecond(0).withNano(0)
+                }
+                unlock.toInstant().toString()
             }
+            "daily_credits" -> {
+                val unlock = now.plusDays(1).withHour(0).withMinute(0).withSecond(0).withNano(0)
+                unlock.toInstant().toString()
+            }
+            "monthly_credits" -> periodEnd
+            else -> ""
+        }
+    }
+
+    private fun formatCreditLimitReachedMessage(unlockAtIso: String): String {
+        if (unlockAtIso.isBlank()) {
+            return "Your credit limit has been reached. Please try again later."
+        }
+        val formatted = runCatching {
+            val instant = java.time.Instant.parse(unlockAtIso)
+            val zoned = instant.atZone(java.time.ZoneId.systemDefault())
+            val formatter = java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy, h:mm a")
+            formatter.format(zoned)
+        }.getOrNull()
+        return if (formatted.isNullOrBlank()) {
+            "Your credit limit has been reached. Please try again later."
+        } else {
+            "Your credit limit has been reached. It will unlock at $formatted."
+        }
+    }
+
+    private fun creditLimitMessageFromErrorBody(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        val obj = runCatching { org.json.JSONObject(raw) }.getOrNull() ?: return null
+        val reason = obj.optString("limit_block_reason", "none")
+        if (reason !in setOf("12h_credits", "daily_credits", "monthly_credits")) return null
+        val periodEnd = obj.optString("period_end", "")
+        val unlockAt = obj.optString("credits_unlock_at", "").ifBlank {
+            inferCreditUnlockIso(reason, periodEnd)
+        }
+        return formatCreditLimitReachedMessage(unlockAt)
+    }
+
+    private fun userFacingChatHttpError(code: Int, errorBody: String?): String {
+        creditLimitMessageFromErrorBody(errorBody)?.let { return it }
+        val parsed = parseChatErrorFromBody(errorBody)
+        if (
+            parsed != null &&
+            (parsed.contains("credit limit", ignoreCase = true) ||
+                parsed.contains("12-hour", ignoreCase = true))
+        ) {
+            val obj = runCatching { org.json.JSONObject(errorBody ?: "") }.getOrNull()
+            val reason = obj?.optString("limit_block_reason", "")?.takeIf { it.isNotBlank() }
+                ?: if (parsed.contains("12-hour", ignoreCase = true)) "12h_credits"
+                else if (parsed.contains("daily credit", ignoreCase = true)) "daily_credits"
+                else "12h_credits"
+            val periodEnd = obj?.optString("period_end", "").orEmpty()
+            val unlockAt = obj?.optString("credits_unlock_at", "")?.takeIf { it.isNotBlank() }
+                ?: inferCreditUnlockIso(reason, periodEnd)
+            return formatCreditLimitReachedMessage(unlockAt)
+        }
+        return when (code) {
+            402, 403 -> {
+                parsed ?: "Allowance exhausted or model not on your plan. Upgrade to continue."
+            }
+            429 -> {
+                parsed ?: "Rate or daily limit reached. Try again later or use the offline model."
+            }
+            503 -> {
+                parsed ?: "This model isn't available. Choose another model."
+            }
+            in 500..599 -> GENERIC_CHAT_ERROR
+            else -> parsed ?: GENERIC_CHAT_ERROR
         }
     }
 
     private fun parseChatErrorResponse(connection: java.net.HttpURLConnection): String? {
-        val raw = connection.errorStream?.bufferedReader()?.readText() ?: return null
-        ingestChatErrorPayload(raw)
-        val obj = runCatching { org.json.JSONObject(raw) }.getOrNull()
-        val detail = when (val field = obj?.opt("detail")) {
-            is org.json.JSONObject -> field.optString("detail").ifBlank { field.toString() }
-            is String -> field
-            else -> obj?.optString("detail")
-        }
-        return detail?.takeIf { it.isNotBlank() } ?: raw.takeIf { it.isNotBlank() }
+        return parseChatErrorFromBody(readHttpErrorBody(connection))
     }
 
     fun String.escapeJson(): String = this
@@ -443,11 +639,12 @@ class cherryAiViewModel : ViewModel(){
     fun startNewChat(context: Context) {
         val appContext = context.applicationContext
         historyAppContext = appContext
+        val draft = captureSessionPersistDraft()
+        resetSessionState()
+        if (draft == null) return
+        val uid = auth.currentUser?.uid ?: return
         viewModelScope.launch {
-            if (messagelist.isNotEmpty()) {
-                finalizeAndPersistSession(appContext)
-            }
-            resetSessionState()
+            persistSessionSnapshot(appContext, uid, draft, finalizeForProfile = true)
         }
     }
 
@@ -471,8 +668,11 @@ class cherryAiViewModel : ViewModel(){
         val uid = auth.currentUser?.uid ?: return
 
         viewModelScope.launch {
-            if (messagelist.isNotEmpty()) {
-                finalizeAndPersistSession(appContext)
+            val draft = captureSessionPersistDraft()
+            if (draft != null) {
+                launch {
+                    persistSessionSnapshot(appContext, uid, draft, finalizeForProfile = true)
+                }
             }
 
             val localSession = withContext(Dispatchers.IO) {
@@ -518,59 +718,83 @@ class cherryAiViewModel : ViewModel(){
         historyAppContext = appContext
 
         viewModelScope.launch {
-            persistSessionSnapshot(appContext, uid, finalizeForProfile = false)
+            val draft = captureSessionPersistDraft() ?: return@launch
+            persistSessionSnapshot(appContext, uid, draft, finalizeForProfile = false)
         }
     }
 
     private suspend fun finalizeAndPersistSession(appContext: Context) {
         val uid = auth.currentUser?.uid ?: return
-        if (messagelist.isEmpty()) return
-        persistSessionSnapshot(appContext, uid, finalizeForProfile = true)
+        val draft = captureSessionPersistDraft() ?: return
+        persistSessionSnapshot(appContext, uid, draft, finalizeForProfile = true)
+    }
+
+    private data class SessionPersistDraft(
+        val sessionId: String,
+        val messages: List<Response>,
+        var compactedSummary: String,
+        var summarizedUntilMessage: Int,
+        var messagesSinceSummary: Int,
+        val sessionCreatedAt: Long,
+    )
+
+    private fun captureSessionPersistDraft(): SessionPersistDraft? {
+        if (messagelist.isEmpty()) return null
+        return SessionPersistDraft(
+            sessionId = currentSessionId,
+            messages = messagelist.toList(),
+            compactedSummary = compactedSummary,
+            summarizedUntilMessage = summarizedUntilMessage,
+            messagesSinceSummary = messagesSinceSummary,
+            sessionCreatedAt = sessionCreatedAt,
+        )
     }
 
     private suspend fun persistSessionSnapshot(
         appContext: Context,
         uid: String,
+        draft: SessionPersistDraft,
         finalizeForProfile: Boolean
     ) {
-        val messages = messagelist.toList()
+        val messages = draft.messages
+        val sessionId = draft.sessionId
         val existing = withContext(Dispatchers.IO) {
-            ChatHistoryStore.findLocal(appContext, uid, currentSessionId)
+            ChatHistoryStore.findLocal(appContext, uid, sessionId)
         }
         val metadata = resolveSessionMetadata(existing, messages)
         if (finalizeForProfile && OnlineMode) {
-            maybeCompactContext()
+            maybeCompactContextForDraft(draft)
         }
-        var finalSummary = metadata.summary.ifBlank { compactedSummary }
+        var finalSummary = metadata.summary.ifBlank { draft.compactedSummary }
         if (finalizeForProfile && finalSummary.isBlank() && messages.isNotEmpty()) {
             val raw = callGeminiMeta(
                 task = "compact",
                 prompt = conversationText(messages),
-                priorSummary = compactedSummary
+                priorSummary = draft.compactedSummary
             )
             if (!raw.isNullOrBlank()) {
-                compactedSummary = clampWords(raw, CONTEXT_SUMMARY_MAX_WORDS)
-                summarizedUntilMessage = messages.size
-                messagesSinceSummary = 0
-                finalSummary = compactedSummary
+                draft.compactedSummary = clampWords(raw, CONTEXT_SUMMARY_MAX_WORDS)
+                draft.summarizedUntilMessage = messages.size
+                draft.messagesSinceSummary = 0
+                finalSummary = draft.compactedSummary
             } else {
                 finalSummary = clampWords(conversationText(messages.takeLast(20)), 40)
             }
         } else if (finalizeForProfile) {
-            finalSummary = finalSummary.ifBlank { compactedSummary }
+            finalSummary = finalSummary.ifBlank { draft.compactedSummary }
         }
 
         val session = ChatSession(
-            id = currentSessionId,
+            id = sessionId,
             title = metadata.title,
             summary = finalSummary,
             lastMessage = messages.lastOrNull()?.message.orEmpty(),
             updatedAt = System.currentTimeMillis(),
             titleRefined = metadata.titleRefined,
-            compactedSummary = compactedSummary.ifBlank { finalSummary },
-            summarizedUntilMessage = summarizedUntilMessage,
-            messagesSinceSummary = messagesSinceSummary,
-            createdAt = existing?.createdAt?.takeIf { it > 0 } ?: sessionCreatedAt,
+            compactedSummary = draft.compactedSummary.ifBlank { finalSummary },
+            summarizedUntilMessage = draft.summarizedUntilMessage,
+            messagesSinceSummary = draft.messagesSinceSummary,
+            createdAt = existing?.createdAt?.takeIf { it > 0 } ?: draft.sessionCreatedAt,
             messages = messages
         )
 
@@ -591,8 +815,11 @@ class cherryAiViewModel : ViewModel(){
         }
         applyLocalFlags(localIds)
 
-        if (finalizeForProfile && session.compactedSummary.isNotBlank()) {
-            maybeUpdateProfileSummary(uid, session.compactedSummary)
+        if (finalizeForProfile && draft.messages.isNotEmpty()) {
+            val chatSnippet = session.compactedSummary.ifBlank {
+                clampWords(conversationText(draft.messages.takeLast(10)), 40)
+            }
+            maybeUpdateProfileSummary(uid, chatSnippet)
         }
     }
 
@@ -714,20 +941,30 @@ class cherryAiViewModel : ViewModel(){
     private suspend fun maybeCompactContext() {
         if (!OnlineMode) return
         if (!shouldCompact(messagesSinceSummary)) return
-        val messages = messagelist.toList()
-        val chunk = compactionChunk(messages, summarizedUntilMessage)
+        val draft = captureSessionPersistDraft() ?: return
+        maybeCompactContextForDraft(draft)
+        compactedSummary = draft.compactedSummary
+        summarizedUntilMessage = draft.summarizedUntilMessage
+        messagesSinceSummary = draft.messagesSinceSummary
+    }
+
+    private suspend fun maybeCompactContextForDraft(draft: SessionPersistDraft) {
+        if (!OnlineMode) return
+        if (!shouldCompact(draft.messagesSinceSummary)) return
+        val messages = draft.messages
+        val chunk = compactionChunk(messages, draft.summarizedUntilMessage)
         if (chunk.size < COMPACTION_WINDOW) return
 
         val chunkText = conversationText(chunk)
         val updated = callGeminiMeta(
             task = "compact",
             prompt = chunkText,
-            priorSummary = compactedSummary
+            priorSummary = draft.compactedSummary
         ) ?: return
 
-        compactedSummary = clampWords(updated, CONTEXT_SUMMARY_MAX_WORDS)
-        summarizedUntilMessage += chunk.size
-        messagesSinceSummary = (messages.size - summarizedUntilMessage).coerceAtLeast(0)
+        draft.compactedSummary = clampWords(updated, CONTEXT_SUMMARY_MAX_WORDS)
+        draft.summarizedUntilMessage += chunk.size
+        draft.messagesSinceSummary = (messages.size - draft.summarizedUntilMessage).coerceAtLeast(0)
     }
 
     private suspend fun maybeUpdateProfileSummary(uid: String, chatSummary: String) {
@@ -735,42 +972,43 @@ class cherryAiViewModel : ViewModel(){
         val nextCount = summarizedChatCount + 1
         summarizedChatCount = nextCount
 
-        val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-        try {
-            db.collection("users").document(uid).update(
-                mapOf(
-                    "summarizedChatCount" to nextCount,
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            ).await()
-        } catch (_: Exception) {
-            // still try local profile refresh below if batch ready
-        }
-
-        if (!shouldRefreshProfile(nextCount)) {
-            _userProfile.value = _userProfile.value?.copy(summarizedChatCount = nextCount)
-            return
-        }
-
         profileBatchInFlight = true
         try {
-            val recent = (
-                listOf(chatSummary) + sessionSummaries
-                    .sortedByDescending { it.updatedAt }
-                    .mapNotNull { s ->
-                        s.compactedSummary.ifBlank { s.summary }.takeIf { it.isNotBlank() }
-                    }
-                )
+            val structured = buildStructuredProfileContext(_userProfile.value)
+            val priorProfile = profileSummary.ifBlank { structured }
+            val recentSummaries = sessionSummaries
+                .sortedByDescending { it.updatedAt }
+                .mapNotNull { s ->
+                    s.compactedSummary.ifBlank { s.summary }.takeIf { it.isNotBlank() }
+                }
                 .distinct()
                 .take(PROFILE_CHAT_BATCH)
-            if (recent.isEmpty()) return
+            val prompt = buildString {
+                append(PROFILE_MERGE_INSTRUCTION)
+                append("\n\n")
+                if (structured.isNotBlank()) {
+                    append("Permanent user facts (never drop):\n")
+                    append(structured)
+                    append("\n\n")
+                }
+                if (priorProfile.isNotBlank()) {
+                    append("Prior profile summary:\n")
+                    append(priorProfile)
+                    append("\n\n")
+                }
+                append("Latest chat summary:\n")
+                append(chatSummary)
+                if (recentSummaries.isNotEmpty()) {
+                    append("\n\nOther recent chat summaries:\n")
+                    append(recentSummaries.joinToString("\n---\n"))
+                }
+            }
 
-            val merged = callGeminiMeta(
-                task = "profile",
-                prompt = recent.joinToString("\n---\n")
-            ) ?: return
+            val merged = callGeminiMeta(task = "profile", prompt = prompt) ?: return
             val profile = clampWords(merged, PROFILE_SUMMARY_MAX_WORDS)
             profileSummary = profile
+
+            val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
             try {
                 db.collection("users").document(uid).update(
                     mapOf(
@@ -785,20 +1023,75 @@ class cherryAiViewModel : ViewModel(){
                 profileSummary = profile,
                 summarizedChatCount = nextCount
             )
+            _userProfile.value?.let { cacheProfile(it, uid) }
         } finally {
             profileBatchInFlight = false
         }
     }
 
     private suspend fun callOfflineMeta(prompt: String): String? {
-        val model = llmInference ?: return null
+        if (llmInference == null) return null
         return try {
-            withContext(Dispatchers.IO) {
-                model.generateResponse(prompt).trim()
-            }
-        } catch (_: Exception) {
+            runOfflineInference(clampOfflineMetaPrompt(prompt)).trim()
+        } catch (_: Throwable) {
             null
         }
+    }
+
+    private fun estimateOfflineTokenCount(text: String): Int {
+        if (text.isBlank()) return 0
+        return (text.length / 3.5).toInt().coerceAtLeast(1)
+    }
+
+    private fun truncateOfflineText(text: String, maxTokens: Int): String {
+        val maxChars = (maxTokens * 3.5).toInt().coerceAtLeast(16)
+        if (text.length <= maxChars) return text
+        return text.take(maxChars - 1).trimEnd() + "…"
+    }
+
+    private fun clampOfflineMetaPrompt(prompt: String): String =
+        truncateOfflineText(prompt, OFFLINE_MAX_PROMPT_TOKENS - 32)
+
+    private fun buildOfflineChatPrompt(
+        mode: ChatMode,
+        priorMessages: List<Response>,
+        question: String,
+    ): String {
+        val system = Instruction.forOffline(mode)
+        var remaining = OFFLINE_MAX_PROMPT_TOKENS -
+            estimateOfflineTokenCount(system) -
+            estimateOfflineTokenCount("User: $question\nAssistant:")
+
+        val historyLines = ArrayList<String>()
+        for (message in priorMessages.asReversed()) {
+            val line = if (message.Role == "User") {
+                "User: ${message.message}"
+            } else {
+                "Assistant: ${message.message}"
+            }
+            val lineTokens = estimateOfflineTokenCount(line)
+            when {
+                lineTokens <= remaining -> {
+                    historyLines.add(0, line)
+                    remaining -= lineTokens
+                }
+                remaining >= 24 -> {
+                    historyLines.add(0, truncateOfflineText(line, remaining))
+                    remaining = 0
+                    break
+                }
+                else -> break
+            }
+        }
+
+        val conversation = buildString {
+            if (historyLines.isNotEmpty()) {
+                historyLines.joinTo(this, "\n")
+                append('\n')
+            }
+            append("User: ").append(question).append("\nAssistant:")
+        }
+        return "${system.trim()}\n\n$conversation"
     }
 
     private fun applySession(session: ChatSession) {
@@ -859,123 +1152,209 @@ class cherryAiViewModel : ViewModel(){
         historyAppContext = null
     }
 
+    fun switchToOnlineMode() {
+        stopCurrentChat()
+        OnlineMode = true
+        refreshOnlineAccount()
+    }
+
     fun switchToOfflineMode(context: Context) {
+        stopCurrentChat()
         OnlineMode = false
         refreshModelStatus(context)
-        if (isModelDownloaded) {
-            loadLocalModel(context)
+    }
+
+    /** True when the active chat's messages are in the on-device top-5 cache. */
+    fun isCurrentSessionCachedLocally(): Boolean {
+        val summary = sessionSummaries.find { it.id == currentSessionId } ?: return true
+        return summary.cachedLocally
+    }
+
+    fun queueMessage(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return
+        queuedMessage = trimmed
+    }
+
+    fun clearQueuedMessage() {
+        queuedMessage = null
+    }
+
+    fun stopCurrentChat() {
+        if (!loading) return
+        chatGenerationId++
+        chatJob?.cancel()
+        chatJob = null
+        runCatching { activeChatConnection?.disconnect() }
+        activeChatConnection = null
+        loading = false
+    }
+
+    fun sendQueuedMessageNow() {
+        val text = queuedMessage?.trim().orEmpty()
+        if (text.isBlank()) return
+        queuedMessage = null
+        stopCurrentChat()
+        if (OnlineMode) {
+            sendmessage(text)
+        } else {
+            sendMessageOffline(text)
         }
     }
 
     fun sendmessage(question: String) {
-        viewModelScope.launch {
+        sendOnlineChat(question.trim(), appendUserMessage = true)
+    }
+
+    private fun sendOnlineChat(question: String, appendUserMessage: Boolean) {
+        if (question.isBlank()) return
+        if (loading) {
+            if (appendUserMessage) {
+                queueMessage(question)
+            }
+            return
+        }
+        chatJob = viewModelScope.launch {
+            val generationId = ++chatGenerationId
             loading = true
             try {
-                messagelist.add(Response(question, "User"))
-
-                val idToken = auth.currentUser?.getIdToken(false)?.await()?.token
-                if (idToken == null) {
-                    _authstate.value = Authstate.Unauthenticated
-                    messagelist.add(
-                        Response(
-                            "Your session expired. Please sign in again to use online chat.",
-                            "Model"
-                        )
-                    )
-                    return@launch
-                }
-
-                val reply = withContext(Dispatchers.IO) {
-                    val prior = messagelist.dropLast(1)
-                    val tail = unsummarizedTail(prior, summarizedUntilMessage)
-                    val history = tail
-                        .map {
-                            val role = if (it.Role == "User") "user" else "model"
-                            """{"role":"$role","content":"${it.message.escapeJson()}"}"""
-                        }
-                        .joinToString(",")
-
-                    val profileJson = if (profileSummary.isBlank()) {
-                        "null"
-                    } else {
-                        "\"${profileSummary.escapeJson()}\""
-                    }
-                    val compactedJson = if (compactedSummary.isBlank()) {
-                        "null"
-                    } else {
-                        "\"${compactedSummary.escapeJson()}\""
-                    }
-
-                    val requestBody = """
-                        {
-                        "message": "${question.escapeJson()}",
-                        "history": [$history],
-                        "instruction": "${instruction.escapeJson()}",
-                        "chat_mode": "${chatMode.displayName.escapeJson()}",
-                        "model": "${selectedModelId.escapeJson()}",
-                        "profile_summary": $profileJson,
-                        "compacted_summary": $compactedJson
-                        }
-                        """.trimIndent()
-
-                    val url = java.net.URL("$BACKEND_BASE/chat")
-                    val connection = url.openConnection() as java.net.HttpURLConnection
-                    connection.requestMethod = "POST"
-                    connection.setRequestProperty("Content-Type", "application/json")
-                    connection.setRequestProperty("Authorization", "Bearer $idToken")
-                    connection.setRequestProperty("X-App-State", AppForegroundHolder.appStateHeader())
-                    connection.doOutput = true
-                    connection.outputStream.write(requestBody.toByteArray())
-
-                    when (connection.responseCode) {
-                        200 -> {
-                            val response = connection.inputStream.bufferedReader().readText()
-                            applyWalletFromChatJson(response)
-                            refreshOnlineAccount()
-                            val obj = org.json.JSONObject(response)
-                            val modelUsed = obj.optString("model_used", obj.optString("model", ""))
-                            if (modelUsed.isNotBlank() &&
-                                !AiModels.sameProvider(selectedModelId, modelUsed)
-                            ) {
-                                pendingModelUnavailable =
-                                    "The provider answered as ${AiModels.displayName(modelUsed)} " +
-                                        "instead of your selected ${AiModels.displayName(selectedModelId)} model. " +
-                                        "Choose another model?"
-                            }
-                            obj.getString("reply")
-                        }
-                        402, 403 -> {
-                            parseChatErrorResponse(connection)
-                                ?: "Allowance exhausted or model not on your plan. Upgrade to continue."
-                        }
-                        429 -> {
-                            parseChatErrorResponse(connection)
-                                ?: "Rate or daily limit reached. Try again later or use the offline model."
-                        }
-                        503 -> {
-                            parseChatErrorResponse(connection)
-                                ?: pendingModelUnavailable
-                                ?: "This model isn't available. Choose another model."
-                        }
-                        else -> {
-                            val error = connection.errorStream?.bufferedReader()?.readText()
-                            "Error ${connection.responseCode}: $error"
-                        }
-                    }
-                }
-
-                messagelist.add(Response(reply, "Model"))
-                messagesSinceSummary =
-                    (messagelist.size - summarizedUntilMessage).coerceAtLeast(0)
-                maybeCompactContext()
-                historyAppContext?.let { persistCurrentSession(it) }
-
+                performOnlineChat(question, generationId, appendUserMessage)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                messagelist.add(Response("Error: ${e.message}", "Model"))
-                historyAppContext?.let { persistCurrentSession(it) }
+                if (generationId == chatGenerationId) {
+                    showChatDialog(GENERIC_CHAT_ERROR)
+                    historyAppContext?.let { persistCurrentSession(it) }
+                }
             } finally {
-                loading = false
+                if (generationId == chatGenerationId) {
+                    loading = false
+                }
+                chatJob = null
             }
+        }
+    }
+
+    private suspend fun performOnlineChat(
+        question: String,
+        generationId: Int,
+        appendUserMessage: Boolean = true,
+    ) {
+        if (appendUserMessage) {
+            messagelist.add(Response(question, "User"))
+        }
+
+        val idToken = auth.currentUser?.getIdToken(false)?.await()?.token
+        if (idToken == null) {
+            _authstate.value = Authstate.Unauthenticated
+            messagelist.add(
+                Response(
+                    "Your session expired. Please sign in again to use online chat.",
+                    "Model"
+                )
+            )
+            return
+        }
+
+        val reply = withContext(Dispatchers.IO) {
+            val prior = messagelist.dropLast(1)
+            val tail = unsummarizedTail(prior, summarizedUntilMessage)
+            val history = tail
+                .map {
+                    val role = if (it.Role == "User") "user" else "model"
+                    """{"role":"$role","content":"${it.message.escapeJson()}"}"""
+                }
+                .joinToString(",")
+
+            val isFirstUserMessageInSession = countUserMessages(prior) == 0
+            val profileJson = if (isFirstUserMessageInSession) {
+                val profileText = profileContextForNewChat(_userProfile.value, profileSummary)
+                if (profileText.isBlank()) {
+                    "null"
+                } else {
+                    "\"${profileText.escapeJson()}\""
+                }
+            } else {
+                "null"
+            }
+            val compactedJson = if (compactedSummary.isBlank()) {
+                "null"
+            } else {
+                "\"${compactedSummary.escapeJson()}\""
+            }
+
+            val requestBody = """
+                {
+                "message": "${question.escapeJson()}",
+                "history": [$history],
+                "instruction": "${Instruction.forChat(chatMode, selectedModelId).escapeJson()}",
+                "chat_mode": "${chatMode.displayName.escapeJson()}",
+                "model": "${selectedModelId.escapeJson()}",
+                "profile_summary": $profileJson,
+                "compacted_summary": $compactedJson
+                }
+                """.trimIndent()
+
+            val url = java.net.URL("$BACKEND_BASE/chat")
+            val connection = url.openConnection() as java.net.HttpURLConnection
+            activeChatConnection = connection
+            try {
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.setRequestProperty("Authorization", "Bearer $idToken")
+                connection.setRequestProperty("X-App-State", AppForegroundHolder.appStateHeader())
+                connection.doOutput = true
+                connection.connectTimeout = 20_000
+                connection.readTimeout = 90_000
+                connection.outputStream.write(requestBody.toByteArray())
+
+                val responseCode = connection.responseCode
+                when (responseCode) {
+                    200 -> {
+                        val response = connection.inputStream.bufferedReader().readText()
+                        applyWalletFromChatJson(response)
+                        refreshOnlineAccount()
+                        val obj = org.json.JSONObject(response)
+                        val modelUsed = obj.optString("model_used", obj.optString("model", ""))
+                        if (modelUsed.isNotBlank() &&
+                            !AiModels.isAutoSelection(selectedModelId) &&
+                            !AiModels.sameProvider(selectedModelId, modelUsed)
+                        ) {
+                            showChatDialog(
+                                "The provider answered as ${AiModels.displayName(modelUsed)} " +
+                                    "instead of your selected ${AiModels.displayName(selectedModelId)} model. " +
+                                    "Choose another model?"
+                            )
+                        }
+                        obj.getString("reply")
+                    }
+                    else -> {
+                        val errorBody = readHttpErrorBody(connection)
+                        ingestChatErrorPayload(errorBody.orEmpty())
+                        val message = userFacingChatHttpError(responseCode, errorBody)
+                        showChatDialog(message)
+                        null
+                    }
+                }
+            } finally {
+                if (activeChatConnection === connection) {
+                    activeChatConnection = null
+                }
+                connection.disconnect()
+            }
+        }
+
+        if (coroutineContext[Job]?.isActive != true || generationId != chatGenerationId) return
+
+        if (reply != null) {
+            messagelist.add(Response(reply, "Model"))
+            messagesSinceSummary =
+                (messagelist.size - summarizedUntilMessage).coerceAtLeast(0)
+            maybeCompactContext()
+            historyAppContext?.let { persistCurrentSession(it) }
+        } else {
+            refreshOnlineAccount()
+            historyAppContext?.let { persistCurrentSession(it) }
         }
     }
 
@@ -1098,6 +1477,18 @@ class cherryAiViewModel : ViewModel(){
 
     suspend fun isCurrentSessionRevoked(context: Context): Boolean =
         securityRepository.isCurrentSessionRevoked(context.applicationContext)
+
+    /** @return true when the server revoked this device session and the user should sign out. */
+    suspend fun syncSecuritySession(context: Context): Boolean {
+        val revoked = securityRepository.syncSecuritySession(
+            context.applicationContext,
+            resolveAuthMethod(),
+        )
+        if (!revoked) {
+            securitySessionRegistered = true
+        }
+        return revoked
+    }
 
     fun requestPasswordReset(email: String, onResult: (Result<Unit>) -> Unit) {
         viewModelScope.launch {
@@ -1228,6 +1619,7 @@ class cherryAiViewModel : ViewModel(){
     private var trackedAuthUid: String? = null
 
     init {
+        _authstate.value = Authstate.Loading
         auth.addAuthStateListener { firebaseAuth ->
             val user = firebaseAuth.currentUser
             val uid = user?.uid
@@ -1276,6 +1668,7 @@ class cherryAiViewModel : ViewModel(){
                 val verified = user?.isEmailVerified == true || result.emailVerified
                 if (verified) {
                     this@cherryAiViewModel.email = user?.email ?: result.email
+                    beginAuthenticatedSession()
                     loadOrCreateUserProfile(user!!.uid, this@cherryAiViewModel.email)
                 } else {
                     auth.signOut()
@@ -1356,6 +1749,7 @@ class cherryAiViewModel : ViewModel(){
         viewModelScope.launch {
             ctx?.let {
                 runCatching { PushTokenRegistrar.unregisterStoredToken(it.applicationContext) }
+                SessionStore.clearSessionId(it.applicationContext)
             }
             if (ctx != null && messagelist.isNotEmpty()) {
                 finalizeAndPersistSession(ctx)
@@ -1389,6 +1783,8 @@ class cherryAiViewModel : ViewModel(){
                 auth.signOut()
                 clearChatHistoryState()
                 clearSecurityState()
+                val ctx = historyAppContext ?: profileStorageContext
+                ctx?.let { SessionStore.clearSessionId(it.applicationContext) }
                 _userProfile.value = null
                 _authstate.value = Authstate.Unauthenticated
             }.onSuccess { onComplete(Result.success(Unit)) }
@@ -1535,7 +1931,14 @@ class cherryAiViewModel : ViewModel(){
         val nameParts = user.displayName?.trim()?.split(" ") ?: emptyList()
         if (nameParts.isNotEmpty() && firstname.isBlank()) firstname = nameParts.first()
         if (nameParts.size > 1 && lastname.isBlank()) lastname = nameParts.drop(1).joinToString(" ")
+        beginAuthenticatedSession()
         loadOrCreateUserProfile(user.uid, email)
+    }
+
+    private fun beginAuthenticatedSession() {
+        securitySessionRegistered = false
+        val ctx = historyAppContext ?: profileStorageContext ?: return
+        SessionStore.rotateSessionId(ctx.applicationContext)
     }
 
     private fun resolveGoogleCollisionEmail(error: Exception?): String? {
@@ -1792,11 +2195,12 @@ class cherryAiViewModel : ViewModel(){
 
                 } catch (e: Exception) {
                     if (file.exists()) file.delete()
+                    Log.w(TAG, "Offline model download failed", e)
                     withContext(Dispatchers.Main) {
                         isDownloading = false
                         downloadProgress = 0f
                         isModelDownloaded = false
-                        messagelist.add(Response("Download failed: ${e.message}", "Model"))
+                        showOfflineDownloadFailedDialog()
                         LocalNotificationHelper.showOfflineDownload(context, success = false)
                     }
                 }
@@ -1805,78 +2209,138 @@ class cherryAiViewModel : ViewModel(){
     }
 
     private var llmInference: LlmInference? = null
+    private var offlineEngineContext: Context? = null
+    private val offlineLlmMutex = Mutex()
 
-    fun loadLocalModel(context: Context) {
-        viewModelScope.launch(Dispatchers.IO) {
+    private class OfflineContextTooLongException : Exception()
 
+    private fun createOfflineEngineLocked(appContext: Context) {
+        val modelFile = File(appContext.filesDir, "Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task")
+        if (!modelFile.exists()) error("Offline model file missing")
+        val options = LlmInference.LlmInferenceOptions.builder()
+            .setModelPath(modelFile.absolutePath)
+            .build()
+        llmInference = LlmInference.createFromOptions(appContext, options)
+    }
+
+    private suspend fun runOfflineInference(prompt: String): String {
+        if (estimateOfflineTokenCount(prompt) >= OFFLINE_MAX_PROMPT_TOKENS) {
+            throw OfflineContextTooLongException()
+        }
+        return offlineLlmMutex.withLock {
+            val appContext = offlineEngineContext
+            val model = llmInference ?: error("Offline model not loaded")
             try {
-                val modelPath =
-                    File(context.filesDir, "Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task").absolutePath
-
-                val options = LlmInference.LlmInferenceOptions.builder()
-                    .setModelPath(modelPath)
-                    .build()
-
-                llmInference = LlmInference.createFromOptions(context, options)
-
-            } catch (t: Throwable) {
-                withContext(Dispatchers.Main) {
-                    messagelist.add(
-                        Response(
-                            "Offline model is not compatible with MediaPipe.",
-                            "Model"
-                        )
-                    )
+                withContext(Dispatchers.IO) {
+                    model.generateResponse(prompt)
                 }
-
-                return@launch
+            } catch (t: Throwable) {
+                Log.w(TAG, "Offline inference failed; recreating on-device session", t)
+                runCatching { llmInference?.close() }
+                llmInference = null
+                if (appContext != null) {
+                    runCatching { createOfflineEngineLocked(appContext) }
+                }
+                throw t
             }
         }
     }
 
-    fun sendMessageOffline(question: String) {
-        if (question.isBlank() || loading) return
-
+    fun loadLocalModel(context: Context) {
+        val appContext = context.applicationContext
+        offlineEngineContext = appContext
         viewModelScope.launch {
-            loading = true
-            try {
-                messagelist.add(Response(question, "User"))
-
-                val model = llmInference
-                if (model == null) {
-                    messagelist.add(Response("Model not loaded", "Model"))
-                    return@launch
-                }
-
-                val history = messagelist
-                    .takeLast(10)
-                    .dropLast(1)
-                    .joinToString("\n") {
-                        if (it.Role == "User") "User: ${it.message}"
-                        else "Assistant: ${it.message}"
+            offlineLlmMutex.withLock {
+                if (llmInference != null) return@launch
+                val modelFile = File(appContext.filesDir, "Qwen2.5-1.5B-Instruct_seq128_q8_ekv4096.task")
+                if (!modelFile.exists()) return@launch
+                try {
+                    createOfflineEngineLocked(appContext)
+                } catch (t: Throwable) {
+                    runCatching { llmInference?.close() }
+                    llmInference = null
+                    Log.w(TAG, "Failed to load offline model", t)
+                    withContext(Dispatchers.Main) {
+                        showChatDialog(
+                            message = "The offline model could not be loaded on this device.",
+                            title = "Offline model unavailable"
+                        )
                     }
-
-                val conversation = if (history.isNotEmpty()) {
-                    "$history\nUser: $question\nAssistant:"
-                } else {
-                    "User: $question\nAssistant:"
                 }
-                val prompt = "${instruction.trim()}\n\n$conversation"
-
-                val reply = withContext(Dispatchers.IO) {
-                    model.generateResponse(prompt)
-                }
-
-                messagelist.add(Response(reply, "Model"))
-                historyAppContext?.let { persistCurrentSession(it) }
-
-            } catch (e: Exception) {
-                messagelist.add(Response("Error: ${e.localizedMessage}", "Model"))
-                historyAppContext?.let { persistCurrentSession(it) }
-            } finally {
-                loading = false
             }
         }
+    }
+
+    override fun onCleared() {
+        runCatching { llmInference?.close() }
+        llmInference = null
+        super.onCleared()
+    }
+
+    fun sendMessageOffline(question: String) {
+        val trimmed = question.trim()
+        if (trimmed.isBlank()) return
+        if (loading) {
+            queueMessage(trimmed)
+            return
+        }
+
+        chatJob = viewModelScope.launch {
+            val generationId = ++chatGenerationId
+            loading = true
+            try {
+                performOfflineChat(trimmed, generationId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: OfflineContextTooLongException) {
+                if (generationId == chatGenerationId) {
+                    if (messagelist.isNotEmpty() && messagelist.last().Role == "User") {
+                        messagelist.removeAt(messagelist.lastIndex)
+                    }
+                    showChatDialog(
+                        message = OFFLINE_CONTEXT_TOO_LONG,
+                        title = "Message too long for offline model"
+                    )
+                }
+            } catch (e: Throwable) {
+                Log.w(TAG, "Offline inference failed", e)
+                if (generationId == chatGenerationId) {
+                    if (messagelist.isNotEmpty() && messagelist.last().Role == "User") {
+                        messagelist.removeAt(messagelist.lastIndex)
+                    }
+                    showChatDialog(GENERIC_CHAT_ERROR)
+                }
+            } finally {
+                if (generationId == chatGenerationId) {
+                    loading = false
+                }
+                chatJob = null
+            }
+        }
+    }
+
+    private suspend fun performOfflineChat(question: String, generationId: Int) {
+        messagelist.add(Response(question, "User"))
+
+        val model = llmInference
+        if (model == null) {
+            if (messagelist.isNotEmpty()) messagelist.removeAt(messagelist.lastIndex)
+            showChatDialog(
+                message = "The offline model is still loading or is not installed. Download it to chat offline.",
+                title = "Offline model not ready"
+            )
+            return
+        }
+
+        val priorMessages = messagelist.dropLast(1)
+        val prompt = buildOfflineChatPrompt(chatMode, priorMessages, question)
+
+        val reply = runOfflineInference(prompt)
+
+        if (coroutineContext[Job]?.isActive != true || generationId != chatGenerationId) return
+
+        messagelist.add(Response(reply, "Model"))
+        historyAppContext?.let { persistCurrentSession(it) }
     }
 }
 enum class GoogleSignInMode {

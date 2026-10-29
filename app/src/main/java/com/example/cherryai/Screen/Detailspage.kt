@@ -8,14 +8,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -42,7 +44,6 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
@@ -57,9 +58,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -355,54 +359,71 @@ fun PlanSelectionScreen(viewmodel: cherryAiViewModel, navController: NavHostCont
         }
     }
     val selectedPlan = planCards[selectedIndex]
-    val currentPlan = planCards.firstOrNull { it.id == currentPlanId } ?: planCards.first()
     val expiry = profile?.planExpiresAt?.toDate()?.let {
         java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault()).format(it)
     } ?: "No expiry date"
+
+    val configuration = LocalConfiguration.current
+    val horizontalPadding = 20.dp
+    val planCardWidth = (configuration.screenWidthDp - 72).coerceIn(280, 400).dp
+    val navy = Color(0xFF13144A)
+    val muted = Color(0xFF85859B)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFFFCFCFF))
-            .verticalScroll(rememberScrollState())
-            .windowInsetsPadding(WindowInsets.navigationBars)
-            .padding(top = 22.dp, bottom = 28.dp)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(horizontal = horizontalPadding)
     ) {
-        IconButton(
-            onClick = { navController.popBackStack() },
-            modifier = Modifier.padding(start = 12.dp, top = 2.dp).size(44.dp)
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = "Back",
-                tint = Color(0xFF1C1C3A),
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier
+                    .size(28.dp)
+                    .clickable { navController.popBackStack() },
+                tint = navy
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = "Billing & Subscription",
+                fontWeight = FontWeight.Bold,
+                fontSize = 22.sp,
+                lineHeight = 28.sp,
+                color = navy,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
         Text(
-            text = "Billing & Subscription",
-            fontSize = 32.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF13144A),
-            modifier = Modifier.padding(start = 28.dp, end = 28.dp, top = 10.dp)
-        )
-        Text(
             text = "Manage your current plan or explore more access.",
-            fontSize = 17.sp,
-            lineHeight = 25.sp,
-            color = Color(0xFF85859B),
-            modifier = Modifier.padding(start = 28.dp, end = 28.dp, top = 8.dp)
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+            color = muted,
+            modifier = Modifier.padding(start = 40.dp, top = 6.dp)
         )
-        Spacer(Modifier.height(26.dp))
-
-        Text("Explore plans", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF13144A), modifier = Modifier.padding(start = 28.dp, top = 10.dp, bottom = 12.dp))
-
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = "Explore plans",
+            fontSize = 18.sp,
+            lineHeight = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = navy,
+            modifier = Modifier.padding(bottom = 10.dp)
+        )
         LazyRow(
             state = listState,
             flingBehavior = flingBehavior,
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 28.dp),
+            contentPadding = PaddingValues(end = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
         ) {
             itemsIndexed(planCards) { index, plan ->
                 val distance = kotlin.math.abs(index - selectedIndex).toFloat()
@@ -413,14 +434,15 @@ fun PlanSelectionScreen(viewmodel: cherryAiViewModel, navController: NavHostCont
                 )
                 PlanCardView(
                     plan = plan,
+                    cardWidth = planCardWidth,
                     scale = scale,
                     selected = index == selectedIndex,
-                    onClick = { /* snapping keeps selection centered */ }
+                    onClick = { /* snapping keeps selection centered */ },
+                    modifier = Modifier.fillParentMaxHeight()
                 )
             }
         }
-
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
         Button(
             onClick = {
                 viewmodel.completeOnboarding(selectedPlan.id) {
@@ -429,25 +451,28 @@ fun PlanSelectionScreen(viewmodel: cherryAiViewModel, navController: NavHostCont
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 28.dp)
-                .height(58.dp),
+                .height(56.dp),
             shape = RoundedCornerShape(20.dp),
             colors = ButtonDefaults.buttonColors(containerColor = selectedPlan.accent)
         ) {
-            if (selectedPlan.id == currentPlan.id) {
+            if (selectedPlan.id == currentPlanId) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Current Plan", fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                    Text("Expires: $expiry", fontSize = 12.sp, fontWeight = FontWeight.Normal)
+                    Text("Current Plan", fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Bold)
+                    Text("Expires: $expiry", fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Normal)
                 }
             } else {
-                Text("Choose ${selectedPlan.name}", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text("Choose ${selectedPlan.name}", fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.Bold)
             }
         }
         Text(
             text = "You can change your plan later.",
             color = Color(0xFF9A9AAF),
             fontSize = 12.sp,
-            modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 10.dp)
+            lineHeight = 16.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp, bottom = 12.dp)
         )
     }
 }
@@ -455,13 +480,16 @@ fun PlanSelectionScreen(viewmodel: cherryAiViewModel, navController: NavHostCont
 @Composable
 private fun PlanCardView(
     plan: PlanCard,
+    cardWidth: Dp,
     scale: Float,
     selected: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = Modifier
-            .width(326.dp)
+        modifier = modifier
+            .width(cardWidth)
+            .fillMaxHeight()
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(30.dp),
@@ -469,8 +497,16 @@ private fun PlanCardView(
         border = BorderStroke(if (selected) 2.dp else 1.dp, plan.accent.copy(alpha = if (selected) 0.9f else 0.18f)),
         shadowElevation = if (selected) 16.dp else 5.dp
     ) {
-        Column(Modifier.padding(25.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Column(
+            Modifier
+                .fillMaxHeight()
+                .padding(horizontal = 24.dp, vertical = 24.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Surface(color = plan.accent.copy(alpha = 0.12f), shape = RoundedCornerShape(18.dp)) {
                     Icon(
                         imageVector = when (plan.id) {
@@ -480,35 +516,71 @@ private fun PlanCardView(
                         },
                         contentDescription = null,
                         tint = plan.accent,
-                        modifier = Modifier.padding(16.dp).size(28.dp)
+                        modifier = Modifier.padding(14.dp).size(26.dp)
                     )
                 }
                 if (plan.popular) {
                     Surface(color = plan.accent.copy(alpha = 0.12f), shape = RoundedCornerShape(20.dp)) {
-                        Text("Most Popular", color = plan.accent, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
+                        Text(
+                            "Most Popular",
+                            color = plan.accent,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                        )
                     }
                 }
             }
-            Spacer(Modifier.height(18.dp))
-            Text(plan.name, fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Color(0xFF12133E))
-            Text(plan.subtitle, fontSize = 16.sp, color = Color(0xFF77778E), modifier = Modifier.padding(top = 4.dp))
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.weight(0.35f))
+            Text(plan.name, fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold, color = Color(0xFF12133E))
+            Text(
+                plan.subtitle,
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
+                color = Color(0xFF77778E),
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            Spacer(Modifier.weight(0.45f))
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(plan.price, fontSize = 36.sp, fontWeight = FontWeight.Bold, color = Color(0xFF12133E))
-                Text(" / month", fontSize = 15.sp, color = Color(0xFF88889C), modifier = Modifier.padding(bottom = 6.dp, start = 5.dp))
+                Text(plan.price, fontSize = 32.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold, color = Color(0xFF12133E))
+                Text(
+                    " / month",
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    color = Color(0xFF88889C),
+                    modifier = Modifier.padding(bottom = 5.dp, start = 5.dp)
+                )
             }
-            Text(plan.description, fontSize = 14.sp, color = Color(0xFF87879A), modifier = Modifier.padding(top = 7.dp))
-            Spacer(Modifier.height(18.dp))
-            androidx.compose.material3.Divider(color = plan.accent.copy(alpha = 0.14f))
-            Spacer(Modifier.height(14.dp))
-            plan.features.forEach { (title, detail) ->
-                Row(Modifier.padding(vertical = 9.dp), verticalAlignment = Alignment.Top) {
-                    Surface(color = plan.accent.copy(alpha = 0.12f), shape = RoundedCornerShape(50)) {
-                        Icon(Icons.Outlined.Check, null, tint = plan.accent, modifier = Modifier.padding(6.dp).size(16.dp))
-                    }
-                    Column(Modifier.padding(start = 12.dp)) {
-                        Text(title, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = Color(0xFF161744))
-                        Text(detail, fontSize = 13.sp, lineHeight = 18.sp, color = Color(0xFF85859B), modifier = Modifier.padding(top = 2.dp))
+            Text(
+                plan.description,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+                color = Color(0xFF87879A),
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Spacer(Modifier.weight(0.55f))
+            androidx.compose.material3.HorizontalDivider(color = plan.accent.copy(alpha = 0.14f))
+            Column(
+                modifier = Modifier
+                    .weight(1.6f)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.SpaceEvenly
+            ) {
+                plan.features.forEach { (title, detail) ->
+                    Row(verticalAlignment = Alignment.Top) {
+                        Surface(color = plan.accent.copy(alpha = 0.12f), shape = RoundedCornerShape(50)) {
+                            Icon(Icons.Outlined.Check, null, tint = plan.accent, modifier = Modifier.padding(5.dp).size(15.dp))
+                        }
+                        Column(Modifier.padding(start = 10.dp)) {
+                            Text(title, fontSize = 14.sp, lineHeight = 19.sp, fontWeight = FontWeight.Medium, color = Color(0xFF161744))
+                            Text(
+                                detail,
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp,
+                                color = Color(0xFF85859B),
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
                     }
                 }
             }

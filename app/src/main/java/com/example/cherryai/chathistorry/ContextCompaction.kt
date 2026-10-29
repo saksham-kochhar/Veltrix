@@ -10,6 +10,9 @@ const val PROFILE_CHAT_BATCH = 15
 const val COMPACT_META_HINT =
     "Max $CONTEXT_SUMMARY_MAX_WORDS words. Preserve decisions, preferences, constraints, unresolved tasks."
 
+const val PROFILE_MERGE_INSTRUCTION =
+    "Merge into one user profile for future chats. Always keep explicit demographics (name, age, gender) and stable preferences. Max $PROFILE_SUMMARY_MAX_WORDS words. No quotes or preamble."
+
 fun unsummarizedTail(
     messages: List<Response>,
     summarizedUntilMessage: Int

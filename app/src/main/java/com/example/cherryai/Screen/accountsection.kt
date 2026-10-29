@@ -32,6 +32,7 @@ import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -61,15 +62,12 @@ import androidx.navigation.NavHostController
 import com.example.cherryai.Navigation.Routes
 import com.example.cherryai.WalletSnapshot
 import com.example.cherryai.cherryAiViewModel
-
-private val AccountBg = Color(0xFFF5F6FA)
-private val AccountNavy = Color(0xFF1A1A3A)
-private val AccountMuted = Color(0xFF8A8A98)
-private val AccountAccent = Color(0xFF5B4DFF)
-private val AccountTrack = Color(0xFFE8E8F0)
+import com.example.cherryai.ui.theme.CherryUiColors
+import com.example.cherryai.ui.theme.cherryUiColors
 
 @Composable
 fun AccountScreen(navcontroller: NavHostController, viewmodel: cherryAiViewModel) {
+    val colors = cherryUiColors()
     val profile by viewmodel.userProfile.collectAsState()
     val plan = profile?.plan?.lowercase() ?: "free"
     val wallet = viewmodel.walletSnapshot
@@ -116,6 +114,13 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: cherryAiViewModel
             iconTint = Color(0xFFF57C00)
         ),
         AccountMenuItem(
+            title = "Settings",
+            subtitle = "Appearance and app preferences",
+            icon = Icons.Outlined.Settings,
+            iconBg = if (colors.isDark) colors.surfaceMuted else Color(0xFFEDE9FE),
+            iconTint = colors.accent
+        ),
+        AccountMenuItem(
             title = "Help & Support",
             subtitle = "Get help and contact support",
             icon = Icons.AutoMirrored.Outlined.HelpOutline,
@@ -127,7 +132,7 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: cherryAiViewModel
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(AccountBg)
+            .background(colors.pageBackground)
             .padding(horizontal = 20.dp)
     ) {
         item {
@@ -143,7 +148,7 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: cherryAiViewModel
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
-                    tint = Color(0xFF1C1C3A),
+                    tint = colors.iconPrimary,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -154,12 +159,12 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: cherryAiViewModel
                 text = "Account",
                 fontSize = 26.sp,
                 fontWeight = FontWeight.Bold,
-                color = AccountNavy
+                color = colors.textSecondary
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "Manage your profile and preferences",
-                color = AccountMuted,
+                color = colors.textMuted,
                 fontSize = 14.sp
             )
 
@@ -169,7 +174,7 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: cherryAiViewModel
         item {
             Card(
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = colors.card),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -190,11 +195,11 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: cherryAiViewModel
                                 text = fullName.ifEmpty { "User" },
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 16.sp,
-                                color = AccountNavy
+                                color = colors.textSecondary
                             )
                             Text(
                                 text = profile?.email ?: "Unable to fetch details",
-                                color = AccountMuted,
+                                color = colors.textMuted,
                                 fontSize = 13.sp,
                                 maxLines = 1
                             )
@@ -206,14 +211,15 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: cherryAiViewModel
                     PlanStatusBanner(
                         plan = plan,
                         freeOnlyMode = wallet.freeOnlyMode,
+                        accent = colors.accent,
                         onViewPlan = { navcontroller.navigate(Routes.details) }
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
-                    HorizontalDivider(color = Color(0xFFF0F0F5))
+                    HorizontalDivider(color = colors.divider)
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    UsageAllowanceSection(wallet = wallet)
+                    UsageAllowanceSection(wallet = wallet, colors = colors)
                 }
             }
 
@@ -223,26 +229,27 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: cherryAiViewModel
         item {
             Card(
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = colors.card),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column {
                     menuItems.forEachIndexed { index, item ->
-                        AccountMenuRow(item) {
+                        AccountMenuRow(item, colors) {
                             when (item.title) {
                                 "Profile Information" -> navcontroller.navigate(Routes.profile)
                                 "Security" -> navcontroller.navigate(Routes.security)
                                 "Notifications" -> navcontroller.navigate(Routes.notifications)
                                 "Offline Data" -> navcontroller.navigate(Routes.offlineData)
                                 "Billing & Subscription" -> navcontroller.navigate(Routes.details)
+                                "Settings" -> navcontroller.navigate(Routes.settings)
                                 "Help & Support" -> navcontroller.navigate(Routes.helpSupport)
                             }
                         }
                         if (index != menuItems.lastIndex) {
                             HorizontalDivider(
                                 modifier = Modifier.padding(horizontal = 16.dp),
-                                color = Color(0xFFF0F0F5)
+                                color = colors.divider
                             )
                         }
                     }
@@ -255,7 +262,7 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: cherryAiViewModel
         item {
             Card(
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = colors.card),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -295,7 +302,7 @@ fun AccountScreen(navcontroller: NavHostController, viewmodel: cherryAiViewModel
 }
 
 @Composable
-private fun UsageAllowanceSection(wallet: WalletSnapshot) {
+private fun UsageAllowanceSection(wallet: WalletSnapshot, colors: CherryUiColors) {
     val monthlyPercent = wallet.monthlyUsedPercent
     val dailyPercent = wallet.dailyUsedPercent
 
@@ -303,7 +310,7 @@ private fun UsageAllowanceSection(wallet: WalletSnapshot) {
         text = "Usage",
         fontWeight = FontWeight.SemiBold,
         fontSize = 14.sp,
-        color = AccountNavy
+        color = colors.textSecondary
     )
     Spacer(modifier = Modifier.height(12.dp))
     Row(
@@ -313,13 +320,19 @@ private fun UsageAllowanceSection(wallet: WalletSnapshot) {
         UsagePercentRing(
             label = "This month",
             percent = monthlyPercent,
-            accent = AccountAccent,
+            accent = colors.accent,
+            track = colors.divider,
+            labelColor = colors.textSecondary,
+            mutedColor = colors.textMuted,
             modifier = Modifier.weight(1f)
         )
         UsagePercentRing(
             label = "Today",
             percent = dailyPercent,
             accent = Color(0xFF00A651),
+            track = colors.divider,
+            labelColor = colors.textSecondary,
+            mutedColor = colors.textMuted,
             modifier = Modifier.weight(1f)
         )
     }
@@ -330,6 +343,9 @@ private fun UsagePercentRing(
     label: String,
     percent: Int,
     accent: Color,
+    track: Color,
+    labelColor: Color,
+    mutedColor: Color,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -350,7 +366,7 @@ private fun UsagePercentRing(
                 )
                 val arcSize = Size(diameter, diameter)
                 drawArc(
-                    color = AccountTrack,
+                    color = track,
                     startAngle = -90f,
                     sweepAngle = 360f,
                     useCenter = false,
@@ -372,7 +388,7 @@ private fun UsagePercentRing(
                 text = "$percent% used",
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
-                color = AccountNavy,
+                color = labelColor,
                 textAlign = TextAlign.Center,
                 lineHeight = 16.sp,
             )
@@ -382,7 +398,7 @@ private fun UsagePercentRing(
             text = label,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
-            color = AccountMuted
+            color = mutedColor
         )
     }
 }
@@ -398,6 +414,7 @@ private fun usagePercent(used: Long, limit: Long): Int {
 private fun PlanStatusBanner(
     plan: String,
     freeOnlyMode: Boolean = false,
+    accent: Color,
     onViewPlan: () -> Unit = {}
 ) {
     val (bannerBg, accentColor, title, subtitle, icon) = when (plan) {
@@ -427,7 +444,7 @@ private fun PlanStatusBanner(
 
         else -> PlanBannerStyle(
             bannerBg = Color(0xFFF0EEFF),
-            accentColor = AccountAccent,
+            accentColor = accent,
             title = "You're on Free",
             subtitle = "Upgrade for a better experience",
             icon = Icons.Default.Redeem
@@ -504,7 +521,7 @@ private data class PlanBannerStyle(
 )
 
 @Composable
-fun AccountMenuRow(item: AccountMenuItem, onClick: () -> Unit = {}) {
+fun AccountMenuRow(item: AccountMenuItem, colors: CherryUiColors, onClick: () -> Unit = {}) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -534,12 +551,12 @@ fun AccountMenuRow(item: AccountMenuItem, onClick: () -> Unit = {}) {
                 item.title,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 15.sp,
-                color = AccountNavy
+                color = colors.textSecondary
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 item.subtitle,
-                color = AccountMuted,
+                color = colors.textMuted,
                 fontSize = 13.sp,
                 lineHeight = 18.sp
             )
